@@ -31,9 +31,9 @@ CURRENT PROJECT STATE
 [DONE] Latest PlatformIO build succeeded on 2026-10-11 after current-log
        restoration, safety-switch, and dashboard slot-toggle changes.
        RAM: 47,032 bytes; flash: 461,209 bytes.
-[PENDING] GitHub Actions PlatformIO build workflow and issue/pull-request
-          templates have been added; the first hosted workflow run is not yet
-          verified.
+[DONE] GitHub Actions PlatformIO build workflow and issue/pull-request
+       templates are added. Hosted esp32dev build passed on 2026-10-19
+       (GitHub Actions run #2); this verifies compilation only, not hardware.
 [DONE] One SD card is configured at GPIO14 for both daily and monthly storage.
 [DONE] RFID key returns are supported on the Locked Screen and Home Dashboard
        pages 2/3; taken-slot state is stored in ESP32 Preferences.
