@@ -1,7 +1,7 @@
 SMARTLOCKER STORAGE - PROJECT PROGRESS
 =====================================
 
-UPDATED: 2026-10-11 (13:47)
+UPDATED: 2026-10-19
 PURPOSE: Compact handoff/progress record aligned with the project conversation.
 PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
 
@@ -31,6 +31,9 @@ CURRENT PROJECT STATE
 [DONE] Latest PlatformIO build succeeded on 2026-10-11 after current-log
        restoration, safety-switch, and dashboard slot-toggle changes.
        RAM: 47,032 bytes; flash: 461,209 bytes.
+[DONE] GitHub Actions PlatformIO build workflow and issue/pull-request
+       templates are added. Hosted esp32dev build passed on 2026-10-19
+       (GitHub Actions run #2); this verifies compilation only, not hardware.
 [DONE] One SD card is configured at GPIO14 for both daily and monthly storage.
 [DONE] RFID key returns are supported on the Locked Screen and Home Dashboard
        pages 2/3; taken-slot state is stored in ESP32 Preferences.
@@ -109,6 +112,9 @@ UPCOMING WORK - PRIORITY ORDER
    procedure.
 5. [SUGGESTED] Test reset and SD migration only with backed-up data; document
    the expected reset/migration outcomes after physical validation.
+6. [PENDING] Configure GitHub branch protection for main after the first
+   successful PlatformIO Actions run; require pull requests and the
+   PlatformIO build / esp32dev status check.
 
 KNOWN LIMITATIONS / DO NOT CLAIM
 --------------------------------
