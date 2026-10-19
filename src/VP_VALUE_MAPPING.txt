@@ -1,0 +1,199 @@
+VP VALUE MAPPING
+================
+
+RTC:
+- Date text = 0x1500, 16 bytes / 8 words
+- Time text = 0x1510, 16 bytes / 8 words
+
+Slots:
+- Slot icon base = 0x1000
+- Slot 1 = 0x1000
+- Slot 40 = 0x1027
+- Slot confirm OK = 0x1028
+- Slot cancel = 0x1029
+- Selected count = 0x1030
+- Slot state values: Available 0x0000, Selected 0x0001; inactive/taken values
+  are defined by SLOT_NA / SLOT_TAKEN in main.cpp.
+- Home Dashboard Pages 2 and 3: tap an available slot to select it; tap the
+  same selected slot again to deselect it; tap a different available slot to
+  move the single selection.
+- Slot touch events are routed by VP address; a returned value of 0x0000 is
+  valid and must not be treated as a missing touch.
+- The active-high safety limit switch on GPIO34 clears temporary selection
+  and returns the interface to the Locked Screen.
+
+Home Dashboard slot registered key-name Text Displays:
+- Base = 0x2000
+- Step = 0x20
+- Length per slot = 32 bytes / 16 words
+- Slot 01 key name = 0x2000
+- Slot 02 key name = 0x2020
+- Slot 03 key name = 0x2040
+- Slot 04 key name = 0x2060
+- Slot 05 key name = 0x2080
+- Slot 06 key name = 0x20A0
+- Slot 07 key name = 0x20C0
+- Slot 08 key name = 0x20E0
+- Slot 09 key name = 0x2100
+- Slot 10 key name = 0x2120
+- Slot 11 key name = 0x2140
+- Slot 12 key name = 0x2160
+- Slot 13 key name = 0x2180
+- Slot 14 key name = 0x21A0
+- Slot 15 key name = 0x21C0
+- Slot 16 key name = 0x21E0
+- Slot 17 key name = 0x2200
+- Slot 18 key name = 0x2220
+- Slot 19 key name = 0x2240
+- Slot 20 key name = 0x2260
+- Slot 21 key name = 0x2280
+- Slot 22 key name = 0x22A0
+- Slot 23 key name = 0x22C0
+- Slot 24 key name = 0x22E0
+- Slot 25 key name = 0x2300
+- Slot 26 key name = 0x2320
+- Slot 27 key name = 0x2340
+- Slot 28 key name = 0x2360
+- Slot 29 key name = 0x2380
+- Slot 30 key name = 0x23A0
+- Slot 31 key name = 0x23C0
+- Slot 32 key name = 0x23E0
+- Slot 33 key name = 0x2400
+- Slot 34 key name = 0x2420
+- Slot 35 key name = 0x2440
+- Slot 36 key name = 0x2460
+- Slot 37 key name = 0x2480
+- Slot 38 key name = 0x24A0
+- Slot 39 key name = 0x24C0
+- Slot 40 key name = 0x24E0
+
+Current Log:
+- Base = 0x1050
+- Step = 0x50
+- Visible cards: Page 1 = 6, Page 2/3 = 4
+- Key Name offset = 0x00, 16 bytes / 8 words
+- Borrower Name offset = 0x08, 32 bytes / 16 words
+- Key Number offset = 0x18, 16 bytes / 8 words
+- Time offset = 0x20, 24 bytes / 12 words
+- Status Icon offset = 0x2C
+- Status values: Empty 0x0000, Borrowed 0x0004, Returned 0x0005
+- Current-day cards are restored from /daily/YYYY-MM-DD/transactions.csv using
+  the RTC date at startup and when the date changes. Up to 40 newest events for
+  the active date are held for display; the daily archive remains on SD.
+
+Transaction Log:
+- Base = 0x3000
+- Step = 0x50
+- Visible rows = 11
+- Key No offset = 0x00, 16 bytes / 8 words
+- Borrower Name offset = 0x08, 32 bytes / 16 words
+- Key Name offset = 0x18, 32 bytes / 16 words
+- Borrowed Time offset = 0x28, 16 bytes / 8 words
+- Returned Time offset = 0x30, 16 bytes / 8 words
+- User offset = 0x38, 32 bytes / 16 words
+
+Account Page:
+- Account card base = 0x3600
+- Step = 0x50
+- Visible cards = 6
+- User Number offset = 0x00, 16 bytes / 8 words
+- User Name offset = 0x08, 32 bytes / 16 words
+- Fingerprint ID offset = 0x18, 16 bytes / 8 words
+- Date Registered offset = 0x20, 16 bytes / 8 words
+
+Registration Page:
+- User name text = 0x3800, 32 bytes / 16 words
+- Name button = 0x3840
+- OK button = 0x3841
+- Add New Key button = 0x3842
+- Back button = 0x3843
+- Status text = 0x3850, 32 bytes / 16 words
+- Status icon = 0x3860
+
+Key Registration Page:
+- Key Name text = 0x3900, 32 bytes / 16 words
+- Key Number / Slot Number text = 0x3920, 16 bytes / 8 words
+- RFID UID text = 0x3930, 16 bytes / 8 words
+- Key Name button = 0x3940
+- Key Number button = 0x3941
+- OK button = 0x3942
+- Back button = 0x3943
+- Status text = 0x3950, 32 bytes / 16 words
+- Status icon = 0x3960
+
+QR Page:
+- Borrower/Name text = 0x1400, 32 bytes / 16 words
+- Status text = 0x1600, 32 bytes / 16 words
+- Selected slot text = 0x1620, 16 bytes / 8 words
+- Borrower code text = 0x1630, 24 bytes / 12 words
+
+Download icon:
+- VP = 0x34E0
+- 0x0000 Idle
+- 0x0001 USB checking
+- 0x0002 USB connected
+- 0x0003 Downloading
+- 0x0004 Success
+- 0x0005 USB not found
+- 0x0006 Failed
+MCP23017 slot output level:
+- LOCK_ACTIVE_LEVEL = HIGH = unlock/active
+- LOCK_INACTIVE_LEVEL = LOW = lock/inactive
+
+Limit switch GPIO:
+- LIMIT_SWITCH_PIN = GPIO34
+- Active level = HIGH
+- No DWIN VP needed
+- Wire active HIGH: switch to 3.3V, external 10k pulldown to GND.
+
+
+Display Idle / Backlight Control:
+- DWIN_BACKLIGHT_VP = 0x0082
+- DWIN_BACKLIGHT_FULL = 100
+- DWIN_BACKLIGHT_OFF = 0
+- DISPLAY_IDLE_TIMEOUT_MS = 30000UL by default
+- Optional wake touch VP = 0x13F0, value 0x0001
+- VP 0x0082 is ESP32-to-DWIN backlight control only; it does not tell ESP32 that the screen was touched.
+- To wake from a blank-area touch, add a DWIN Return Key Code / Basic Touch object that sends VP 0x13F0.
+
+
+Admin authentication:
+- Admin Login Page = 5; Admin Dashboard = 7.
+- Page 7 and admin-only pages require a successful PIN login.
+- Default PIN = 3030; saved PIN is stored in ESP32 Preferences.
+
+
+Page 27 Update Password VP Map
+------------------------------
+- Old PIN text       = 0x3B00, 8 bytes / 4 words
+- New PIN text       = 0x3B10, 8 bytes / 4 words
+- Confirm PIN text   = 0x3B20, 8 bytes / 4 words
+- Old PIN button     = 0x3B30, value 0x0001
+- New PIN button     = 0x3B31, value 0x0001
+- Confirm PIN button = 0x3B32, value 0x0001
+- OK / Save button   = 0x3B33, value 0x0001
+- Back button        = 0x3B34, value 0x0001
+- Status text        = 0x3B40, 32 bytes / 16 words
+- Status icon        = 0x3B60
+  - 0x0000 Idle
+  - 0x0001 Editing
+  - 0x0002 Saved
+  - 0x0003 Error
+
+Storage hardware:
+- One SD card on SPI chip select GPIO14.
+- Daily archives: /daily/YYYY-MM-DD/
+- Monthly archives: /monthly/YYYY-MM/
+- Daily and monthly records are mirrored on this same card.
+- The selected-date Download UI remains mapped, but CH376S USB detection and
+  file copying are not implemented; do not treat 0x0004 as an actual export.
+
+Updated behavior:
+- Registered RFID key returns are scanned on Page 1 and Home Dashboard Pages 2/3.
+- Slot occupancy is persisted in ESP32 Preferences.
+- Slot outputs are timed and relocked after borrowing or returning.
+- Home Dashboard slot selection toggles off on a repeated tap; a different
+  available slot replaces the previous selection on both Pages 2 and 3.
+- Dashboard slot/confirm input is ignored while the safety limit switch is
+  active; stale selections are cleared on page transitions.
+- See FEATURES_FLOW.txt for complete hardware, storage layout, and user flows.

@@ -1,0 +1,129 @@
+SMARTLOCKER STORAGE - PROJECT PROGRESS
+=====================================
+
+UPDATED: 2026-10-11 (13:47)
+PURPOSE: Compact handoff/progress record aligned with the project conversation.
+PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
+
+AI SESSION CONTINUITY
+--------------------
+When AI usage, context, or session capacity is getting close to its limit,
+update this file before the session ends or context is summarized. Record the
+latest completed changes, validation/build results, unresolved issues, and
+the next concrete action so work can resume without losing project progress.
+When starting or resuming project work, scan this file first and use it as
+the project handoff record. It is persistent project documentation, not
+guaranteed model memory; verify its notes against the current source when
+making implementation decisions. Update the UPDATED date whenever this file
+is revised.
+
+STATUS KEY
+----------
+[DONE]       Implemented and compile-verified.
+[PENDING]    Not implemented or not yet verified.
+[LIMITATION] Known gap; do not treat as working functionality.
+
+CURRENT PROJECT STATE
+---------------------
+[DONE] PlatformIO targets esp32dev and compiles src/main.cpp as the single
+       application translation unit. Feature implementation is in headers
+       included by main.cpp so shared project state remains available.
+[DONE] Latest PlatformIO build succeeded on 2026-10-11 after current-log
+       restoration, safety-switch, and dashboard slot-toggle changes.
+       RAM: 47,032 bytes; flash: 461,209 bytes.
+[DONE] One SD card is configured at GPIO14 for both daily and monthly storage.
+[DONE] RFID key returns are supported on the Locked Screen and Home Dashboard
+       pages 2/3; taken-slot state is stored in ESP32 Preferences.
+[DONE] Borrow/return slot outputs use timed relocking. Admin-only pages and
+       controls require an authenticated admin session.
+[DONE] Optional QR borrower lookup supports /students.csv on the SD root.
+[DONE] Current-log restoration is implemented from the RTC day's daily
+       transaction archive at startup, and refreshes when the RTC date changes.
+[PENDING] The current-log power-cycle and midnight rollover behavior still
+          need validation on the physical device.
+[DONE] Safety handling locks outputs, clears temporary slot/QR selection, and
+       returns to Locked Screen; dashboard slot/confirm input is rejected while
+       the active-high limit switch is active.
+[DONE] Dashboard slot handling supports one selected available slot; a repeat
+       tap deselects it and a tap on another available slot moves the
+       selection. Implemented for both Pages 2 and 3; zero-valued slot VP
+       events are accepted.
+[PENDING] Physical testing found the previous dashboard behavior did not
+          deselect on a repeat tap. Updated toggle code now compiles, but the
+          corrected behavior still needs retesting on both dashboard pages.
+[DONE] Project feature/flow guide and DWIN VP map are in FEATURES_FLOW.txt and
+       VP_VALUE_MAPPING.txt.
+[DONE] Progress through the conversation: .ino integration was replaced by
+       implementation headers included by main.cpp; a successful build was
+       reached before and after the later storage/feature updates.
+
+STORAGE AND BEHAVIOR NOTES
+-------------------------
+- SD archive folders: /daily/YYYY-MM-DD/ and /monthly/YYYY-MM/.
+- Daily and monthly CSV records are mirrored onto the same GPIO14 SD card.
+- Legacy root CSV files are migrated during startup; the source is retained
+  when migration fails.
+- Slot taken/available state, user accounts, registered keys, active slot
+  settings, and admin PIN are stored in ESP32 Preferences.
+- Fingerprint templates remain in the fingerprint sensor.
+- Current-log cards are reconstructed from today's SD transaction archive;
+  transaction history/date folders are also restored from SD at startup.
+- resetEverythingForActualProject() clears project data and must remain
+  disabled in normal setup.
+
+UPCOMING WORK - PRIORITY ORDER
+------------------------------
+1. [PENDING] Run a physical hardware acceptance test before treating locker
+   operation as field-ready:
+   - Confirm GPIO14 SD initialization, writing, and card-removal behavior.
+   - Test daily/monthly CSV creation, quoted CSV fields, reboot history reload,
+     and legacy root-file migration on a backed-up test card.
+   - Borrow/return multiple slots and verify each output relocks independently.
+   - Verify RFID returns on Locked Screen and both Home Dashboard pages.
+   - Power-cycle and verify today's current-log cards and occupied/available
+     slot states persist as intended.
+   - Change or advance the RTC across midnight and verify the current-log view
+     changes to the new day's archive without deleting prior-day files.
+   - Exercise QR/manual borrower entry, optional roster lookup, admin access,
+     limit-switch safety, and display idle/wake behavior.
+   - Specifically trigger the limit switch after selecting a dashboard slot,
+     release it, re-enter the dashboard, and confirm a zero-valued slot VP
+     touch selects the slot and the confirm button proceeds normally.
+   - On either dashboard, tap one available slot twice to verify it selects
+     then deselects; tap two different available slots to verify selection
+     moves to the newly tapped slot before confirming.
+2. [SUGGESTED] Improve reliability and observability:
+   - Add debouncing/stability filtering for the mechanical limit switch if
+     physical testing shows contact bounce or repeated transitions.
+   - Surface SD write failures on the display and define what the user should
+     do when a transaction cannot be durably logged.
+   - Add a repeatable test checklist for slot selection, limit-switch
+     interruption, borrow/return, reboot recovery, and date rollover.
+   - Back up the SD card before reset/migration testing and retain test logs.
+3. [PENDING] Decide and implement the USB export workflow. Confirm the exact
+   CH376S hardware/interface and required export behavior, then add and test
+   real drive detection and file copying. Until then, USB export is not
+   implemented and a displayed success state is not proof of a copied file.
+4. [SUGGESTED] Review deployment security: replace the default admin PIN
+   (3030) before deployment and define a secure first-run/admin recovery
+   procedure.
+5. [SUGGESTED] Test reset and SD migration only with backed-up data; document
+   the expected reset/migration outcomes after physical validation.
+
+KNOWN LIMITATIONS / DO NOT CLAIM
+--------------------------------
+[LIMITATION] CH376S USB detection and file export are placeholders, not a
+             working feature.
+[PENDING]    Firmware has compile verification, but no physical-device test
+             results are recorded here for the RTC current-log restore or the
+             latest dashboard selection toggle.
+[LIMITATION] Do not enable resetEverythingForActualProject() during normal
+             operation; it is destructive to stored project data.
+
+SOURCE OF DETAIL
+----------------
+- FEATURES_FLOW.txt: hardware, application flow, persistence, storage, limits.
+- VP_VALUE_MAPPING.txt: DWIN VP addresses and related UI mappings.
+- src/main.cpp: project configuration, shared declarations, setup(), loop().
+- Physical verification is authoritative for touch VP configuration and
+  hardware behavior; build success alone does not establish it.

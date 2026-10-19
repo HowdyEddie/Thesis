@@ -1,0 +1,174 @@
+SMARTLOCKER STORAGE - PROJECT FEATURES AND FLOW
+================================================
+
+Project
+-------
+SmartLockerStorage is an ESP32-based locker controller with a DWIN user
+interface, fingerprint user access, QR/manual borrower identification, RFID
+key returns, slot lock outputs, administration, and SD-card audit logs.
+
+Build
+-----
+The PlatformIO project targets the ESP32 DevKit V4 / esp32dev board and uses
+src/main.cpp as its application translation unit. Feature implementation
+headers are included once by main.cpp so they share the project declarations
+and state. Build from the project directory with:
+
+  pio run
+
+Hardware and pin assignments
+-----------------------------
+- ESP32 DevKit V4.
+- DWIN DMG80480Y070_02NR: UART2, RX GPIO16, TX GPIO17, 115200 baud.
+- R503 fingerprint sensor: UART1, RX GPIO26, TX GPIO27, 57600 baud.
+- GM861S/B1 QR scanner: software serial RX GPIO32, TX GPIO33, 9600 baud.
+- DS3231 RTC and three MCP23017 expanders: I2C SDA GPIO21, SCL GPIO22.
+- RC522 RFID: shared SPI SCK GPIO18, MISO GPIO19, MOSI GPIO23, CS GPIO5,
+  reset GPIO4.
+- One microSD module only: shared SPI, chip select GPIO14.
+- CH376S USB interface placeholder: chip select GPIO25.
+- Active-high safety limit switch: GPIO34, external 10k pulldown to GND.
+- 40 slot outputs are driven by three MCP23017 expanders at I2C addresses
+  0x20, 0x21, and 0x22. HIGH activates/unlocks an output; LOW locks it.
+
+No SD select or export-SD select is assigned to GPIO13 or GPIO15.
+
+Startup and main loop
+---------------------
+1. setup() starts Serial, configures chip-select pins, initializes SPI and
+   DWIN UART, initializes the limit switch, and sets safe default slot states.
+2. The loading page initializes I2C, RTC, the MCP23017 expanders, the single
+   GPIO14 SD card, RFID, fingerprint, QR, and the USB placeholder.
+3. Maintenance settings, accounts, registered keys, admin PIN, transaction
+   history, and available log dates are loaded from persistent storage.
+4. The DWIN opens Page 1 (Locked Screen).
+5. loop() handles DWIN events, safety checks, RTC updates, USB status checks,
+   idle sleep, fingerprint login on the Locked Screen, RFID return scans on
+   the Locked Screen and both Home Dashboard pages, timed slot relocking, and
+   QR input while Page 4 is active.
+
+User access and borrowing
+-------------------------
+1. On Page 1, a fingerprint must match a sensor template linked to a saved
+   account before the Home Dashboard opens. The account name becomes the
+   current user for borrow records.
+2. On Page 2 or 3, tapping an active, unoccupied slot selects it. Tapping that
+   same slot again deselects it; tapping a different available slot moves the
+   selection. This single-selection toggle works on both dashboards. The user
+   confirms the selection to continue. Slot touch events are identified by
+   their VP address; a value of 0x0000 is valid.
+3. Page 4 starts QR scanning automatically. The borrower name is extracted
+   from supported QR text, optionally resolved from /students.csv, or entered
+   with the on-screen keyboard.
+4. Confirming a borrower marks the slot as taken in ESP32 Preferences, adds
+   current-session and transaction log entries, appends daily and monthly SD
+   records, and energizes that slot output.
+5. The slot output automatically returns to the locked level after
+   RETURN_UNLOCK_MS. The slot remains marked occupied until its registered
+   RFID key is scanned on Page 1, 2, or 3.
+
+RFID return flow
+----------------
+1. RFID is polled on the Locked Screen and Home Dashboard pages.
+2. The scanned UID must match a registered key whose slot is currently marked
+   taken. Unknown keys and keys for unoccupied slots do not change the locker.
+3. The matching slot is marked available in Preferences, its output is
+   activated for RETURN_UNLOCK_MS, and the output is then relocked.
+4. Current logs, the transaction history, and SD audit files receive a return
+   record. Repeat scans of the same UID are rate-limited.
+
+Admin flow and pages
+--------------------
+- Admin buttons open Page 5, where the four-digit PIN is checked.
+- The default PIN is 3030. A changed PIN is stored in ESP32 Preferences.
+- Successful login opens Page 7. Account, registration, key registration,
+  maintenance, and password-update page commands require an authenticated
+  admin session. Returning to a user dashboard or the Locked Screen ends that
+  session.
+- Page 7 displays transaction rows and selectable dates. Page 8 displays
+  accounts and links to registration and Page 27 password update.
+- Page 9 enrolls a user by saving a name and enrolling a fingerprint twice.
+- Page 10 associates a key name, slot number 1-40, and RFID UID.
+- Pages 11/12 let an admin mark slots active or inactive; those settings are
+  saved to ESP32 Preferences.
+- The DWIN page and VP reference is in VP_VALUE_MAPPING.txt.
+
+Persistent data and SD archive layout
+-------------------------------------
+The one SD card on GPIO14 stores both archive periods. Each event row is
+written to a date folder and also mirrored into that month's folder:
+
+  /daily/YYYY-MM-DD/accounts.csv
+  /daily/YYYY-MM-DD/keys.csv
+  /daily/YYYY-MM-DD/transactions.csv
+  /daily/YYYY-MM-DD/returns.csv
+
+  /monthly/YYYY-MM/accounts.csv
+  /monthly/YYYY-MM/keys.csv
+  /monthly/YYYY-MM/transactions.csv
+  /monthly/YYYY-MM/returns.csv
+
+The files are append-only CSVs. Text fields containing commas, quotes, or
+line breaks are quoted and escaped. Transaction rows have these fields:
+date,key number,borrower,key name,borrow time,return time,user.
+Account, key-registration, and return rows retain their existing field
+layouts. Transaction rows and date folders are read back on startup for the
+Admin Dashboard. Current-log cards are rebuilt from the RTC day's transaction
+archive during startup and when the RTC date changes. They therefore survive
+a power cycle as long as SD writes succeeded and the same card is available.
+The current-log display retains the newest 40 events for the active date.
+
+Existing root-level accounts.csv, keys.csv, transactions.csv, and returns.csv
+are migrated into the matching daily and monthly folders on startup. The
+legacy root file is removed only after all of its rows have been archived.
+If migration fails, an error is logged and the source file is retained for a
+later retry.
+
+User accounts, registered keys, active/inactive slot settings, taken/available
+slot state, and the admin PIN are saved in ESP32 Preferences. Fingerprint
+templates remain in the sensor. The resetEverythingForActualProject()
+function clears these records, known SD archives, and fingerprint templates;
+its call in setup() is commented out and must remain so during normal use.
+
+Student roster (optional)
+-------------------------
+Place /students.csv in the SD card root. Each row contains:
+
+  student_code,student_name
+
+The QR code's extracted borrower code is matched to the first column. A match
+overrides the name extracted from QR text. If the file or code is not found,
+the existing QR parser name or manual keyboard entry is used. The reset
+routine does not delete /students.csv.
+
+Safety and display idle
+-----------------------
+- GPIO34 is checked every LIMIT_SWITCH_CHECK_INTERVAL milliseconds. On an
+  active edge, all slot outputs are locked and temporary selection/QR data is
+  cleared; the UI returns to Page 1.
+- Entering or leaving a dashboard clears stale slot selections. Dashboard
+  slot/confirm touches are ignored while the safety switch is active. A DWIN
+  slot touch is identified by its VP, so a returned data value of 0x0000 is
+  accepted as a valid touch value.
+- A dashboard slot touch toggles the selected slot off when that same
+  available slot is tapped again. Tapping another available slot moves the
+  single selection. This behavior is implemented for both Pages 2 and 3.
+- After DISPLAY_IDLE_TIMEOUT_MS without user activity, unfinished input is
+  cleared, the display returns to Page 1, and the DWIN backlight is turned off.
+- A DWIN Return Key Code / Basic Touch object using VP 0x13F0 can provide a
+  dedicated wake touch. The first touch while asleep wakes only the display.
+
+Download status and known hardware dependency
+----------------------------------------------
+The selected-date USB download workflow is not complete. usbHostConnected()
+currently reports no drive, and no CH376S disk-detection or file-copy
+protocol/library is configured in this project. The download button therefore
+does not export data; the SD archive remains available by removing the card
+and reading it on a computer. Do not treat a displayed download-success value
+as confirmation of an actual USB copy.
+
+RTC setup
+---------
+To set a fixed DS3231 date/time once, set SET_RTC_FIXED_ONCE to 1, configure
+the RTC_FIXED_* values in main.cpp, upload, then set the flag back to 0 and
+upload again. If the RTC reports lost power, it is set to the compile time.
