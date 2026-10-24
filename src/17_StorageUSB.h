@@ -260,9 +260,7 @@ bool loadLogsFromSD() {
     dateCardOffset = dateLogCount > DATE_CARD_COUNT ? dateLogCount - DATE_CARD_COUNT : 0;
     selectedDateVisibleIndex = dateLogCount - 1 - dateCardOffset;
   }
-  if (transactionLogCount > TRANS_VISIBLE_ROWS) {
-    transactionLogOffset = transactionLogCount - TRANS_VISIBLE_ROWS;
-  }
+  transactionLogOffset = 0;
 
   String today = getRTCDateString();
   if (today != "0000-00-00") {
@@ -338,19 +336,61 @@ bool initStorageModules() {
 }
 
 /*
+  Performs the CH376 CHECK_EXIST command before calling library initialization.
+  This prevents the library's startup interrupt-drain loop from running when
+  the controller is not present.
+*/
+bool probeCH376Controller() {
+  digitalWrite(SD_STORAGE_CS, HIGH);
+  digitalWrite(RFID_CS, HIGH);
+  digitalWrite(USB_CS, HIGH);
+
+  SPI.beginTransaction(SPISettings(125000, MSBFIRST, SPI_MODE0));
+  digitalWrite(USB_CS, LOW);
+  SPI.transfer(0x06);
+  SPI.transfer(0x01);
+  uint8_t response = SPI.transfer(0x00);
+  digitalWrite(USB_CS, HIGH);
+  SPI.endTransaction();
+
+  debugHex16("probeCH376Controller", "CHECK_EXIST response", response);
+  return response == 0xFE;
+}
+
+/*
   Function: initUSBHost()
   Description:
-    Initializes the CH376S USB host SPI chip-select line.
-    Low-level CH376S SPI commands are left as a replaceable section.
+    Initializes and verifies the CH376S SPI host controller.
 
   How to use:
     Called during loading screen.
 */
 bool initUSBHost() {
   digitalWrite(USB_CS, HIGH);
-  usbReady = true;
+  digitalWrite(SD_STORAGE_CS, HIGH);
+  digitalWrite(RFID_CS, HIGH);
 
-  debugLog("initUSBHost", "CH376S USB CS pin ready. Low-level CH376S file copy is still a placeholder.");
+  if (!probeCH376Controller()) {
+    usbReady = false;
+    usbInserted = false;
+    previousUSBInserted = false;
+    debugFail("initUSBHost", "CH376S controller was not detected by SPI CHECK_EXIST; skipping library initialization.");
+    return false;
+  }
+
+  flashDrive.init();
+  usbReady = flashDrive.getCHpresence();
+  if (!usbReady) {
+    usbInserted = false;
+    previousUSBInserted = false;
+    debugFail("initUSBHost", "CH376S did not respond over SPI; check CS GPIO25, INT GPIO35, shared SPI, power, and SPI mode.");
+    return false;
+  }
+
+  usbInserted = flashDrive.getDeviceStatus();
+  previousUSBInserted = usbInserted;
+  debugOK("initUSBHost");
+  debugValue("initUSBHost", "USB drive mounted", usbInserted ? "YES" : "NO");
   return true;
 }
 
@@ -362,22 +402,10 @@ bool initUSBHost() {
   How to use:
     bool inserted = usbHostConnected();
 
-  Important:
-    This is still the replaceable CH376S section.
-    Add your CH376S library's disk-detect command here.
-
-    The reason this function does not print FAILED every time is because
-    monitorUSBInsertion() calls it repeatedly, like a laptop watching for USB insert.
+  The CH376 library's interrupt poll updates its mounted-drive status.
 */
 bool usbHostConnected() {
-  // TODO:
-  // Replace this false return with your CH376S disk-connect check.
-  //
-  // Example idea with a CH376S library:
-  //   return ch376.diskConnected();
-  //
-  // Until the real CH376S check is added, USB will always appear missing.
-  return false;
+  return usbReady && flashDrive.getDeviceStatus();
 }
 
 /*
@@ -392,8 +420,9 @@ bool usbHostConnected() {
 */
 void monitorUSBInsertion() {
   if (!usbReady) return;
-  if (millis() - lastUSBMonitorCheck < 1000) return;
 
+  bool interruptReported = flashDrive.checkIntMessage();
+  if (!interruptReported && millis() - lastUSBMonitorCheck < 1000) return;
   lastUSBMonitorCheck = millis();
 
   usbInserted = usbHostConnected();
@@ -407,6 +436,95 @@ void monitorUSBInsertion() {
 
     previousUSBInserted = usbInserted;
   }
+}
+
+bool copyDailyArchiveFileToUSB(const String &dateText,
+                               const char *archiveFileName,
+                               char categoryCode,
+                               bool &sourceExists,
+                               bool &sourceHasData) {
+  String sourcePath = "/daily/" + dateText + "/" + archiveFileName;
+  sourceExists = SD.exists(sourcePath.c_str());
+  sourceHasData = false;
+  if (!sourceExists) return true;
+
+  File source = SD.open(sourcePath.c_str(), FILE_READ);
+  if (!source) {
+    debugValue("copyDailyArchiveFileToUSB", "Could not open SD archive", sourcePath);
+    return false;
+  }
+
+  uint32_t expectedSize = source.size();
+  sourceHasData = expectedSize > 0;
+  if (!sourceHasData) {
+    source.close();
+    debugValue("copyDailyArchiveFileToUSB", "Skipped empty archive", sourcePath);
+    return true;
+  }
+
+  String shortDate = dateText.substring(2, 4) +
+                     dateText.substring(5, 7) +
+                     dateText.substring(8, 10);
+  char destinationName[13];
+  snprintf(destinationName, sizeof(destinationName), "%s%c.CSV",
+           shortDate.c_str(), categoryCode);
+
+  flashDrive.setFileName(destinationName);
+  uint8_t deleteStatus = flashDrive.deleteFile();
+  if (deleteStatus != ANSW_USB_INT_SUCCESS &&
+      deleteStatus != ANSW_ERR_MISS_FILE) {
+    source.close();
+    debugNumber("copyDailyArchiveFileToUSB", "Could not replace USB file; status", deleteStatus);
+    return false;
+  }
+
+  flashDrive.setFileName(destinationName);
+  uint8_t openStatus = flashDrive.openFile();
+  if (openStatus != ANSW_ERR_MISS_FILE) {
+    source.close();
+    debugNumber("copyDailyArchiveFileToUSB", "USB file was not ready for creation; status", openStatus);
+    return false;
+  }
+
+  uint8_t buffer[64];
+  bool writeSucceeded = true;
+  uint32_t bytesWritten = 0;
+  while (source.available()) {
+    int bytesRead = source.read(buffer, sizeof(buffer));
+    if (bytesRead <= 0 ||
+        !flashDrive.writeFile(reinterpret_cast<char *>(buffer),
+                              static_cast<uint8_t>(bytesRead))) {
+      writeSucceeded = false;
+      break;
+    }
+    bytesWritten += static_cast<uint32_t>(bytesRead);
+  }
+  source.close();
+
+  uint8_t closeStatus = flashDrive.closeFile();
+  if (!writeSucceeded || bytesWritten != expectedSize ||
+      closeStatus != ANSW_USB_INT_SUCCESS) {
+    debugNumber("copyDailyArchiveFileToUSB", "USB write/close status", closeStatus);
+    return false;
+  }
+
+  flashDrive.setFileName(destinationName);
+  uint8_t verifyStatus = flashDrive.openFile();
+  if (verifyStatus != ANSW_USB_INT_SUCCESS) {
+    debugNumber("copyDailyArchiveFileToUSB", "Could not reopen exported file; status", verifyStatus);
+    return false;
+  }
+
+  uint32_t destinationSize = flashDrive.getFileSize();
+  uint8_t verifyCloseStatus = flashDrive.closeFile();
+  if (destinationSize != expectedSize ||
+      verifyCloseStatus != ANSW_USB_INT_SUCCESS) {
+    debugNumber("copyDailyArchiveFileToUSB", "Exported file size mismatch", destinationSize);
+    return false;
+  }
+
+  debugValue("copyDailyArchiveFileToUSB", "Exported USB file", destinationName);
+  return true;
 }
 
 /*
@@ -559,64 +677,71 @@ bool appendLineToDaySD(String path, String line) {
 }
 
 /*
-  Function: downloadSelectedDateLogToUSB()
-  Description:
-    Copies the selected date log to the inserted USB flash drive.
-
-    Current behavior:
-      - Re-checks USB before downloading.
-      - Shows Downloading status.
-      - Confirms SD availability.
-      - Leaves the final CH376S file-copy part as the replaceable section.
-
-  How to use:
-    Called by Admin Download button after a date is selected.
+  Exports the selected date's daily CSV archives to the USB drive root.
+  Names follow the FAT 8.3 format: YYMMDD plus A/K/T/R and ".CSV".
 */
 void downloadSelectedDateLogToUSB() {
   debugValue("downloadSelectedDateLogToUSB", "Requested date", selectedDateText);
 
-  if (selectedDateText.length() == 0) {
+  if (!isValidArchiveDate(selectedDateText)) {
     writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
-    debugFail("downloadSelectedDateLogToUSB", "No selected date.");
+    debugFail("downloadSelectedDateLogToUSB", "Selected date is missing or invalid.");
     return;
   }
 
-  if (!usbHostConnected()) {
+  if (!usbHostConnected() || !flashDrive.driveReady()) {
     usbInserted = false;
     previousUSBInserted = false;
     writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_NOT_FOUND);
-    debugFail("downloadSelectedDateLogToUSB", "USB was removed or not detected.");
+    debugFail("downloadSelectedDateLogToUSB", "USB drive is not mounted or ready.");
     return;
   }
 
   writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_IN_PROGRESS);
 
+  digitalWrite(USB_CS, HIGH);
+  digitalWrite(RFID_CS, HIGH);
   if (!SD.begin(SD_STORAGE_CS, SPI)) {
+    digitalWrite(SD_STORAGE_CS, HIGH);
     writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
     debugFail("downloadSelectedDateLogToUSB", "SD card not available at CS GPIO14.");
     return;
   }
 
-  /*
-    TODO:
-      Add the real CH376S copy command here.
+  const char *archiveNames[] = {
+    "accounts.csv", "keys.csv", "transactions.csv", "returns.csv"
+  };
+  const char categoryCodes[] = { 'A', 'K', 'T', 'R' };
+  uint8_t exportedCount = 0;
+  bool exportSucceeded = true;
+  bool anySourceExists = false;
 
-      Intended final flow:
-        1. Build source filename from selectedDateText.
-        2. Open the selected log file from SD.
-        3. Create a new file on the USB flash drive.
-        4. Read bytes from SD.
-        5. Write bytes to USB using CH376S.
-        6. Close both files.
-        7. Show DOWNLOAD_SUCCESS.
-
-      For now, this section is intentionally marked failed because
-      CH376S low-level file writing has not been connected to a library yet.
-  */
+  for (uint8_t i = 0; i < 4 && exportSucceeded; i++) {
+    bool sourceExists = false;
+    bool sourceHasData = false;
+    exportSucceeded = copyDailyArchiveFileToUSB(
+        selectedDateText, archiveNames[i], categoryCodes[i],
+        sourceExists, sourceHasData);
+    anySourceExists = anySourceExists || sourceExists;
+    if (sourceExists && sourceHasData && exportSucceeded) exportedCount++;
+  }
 
   SD.end();
+  digitalWrite(SD_STORAGE_CS, HIGH);
 
-  delay(500);
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
-  debugFail("downloadSelectedDateLogToUSB", "USB detected, but CH376S file-copy code is still placeholder.");
+  if (!exportSucceeded || !anySourceExists || exportedCount == 0) {
+    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
+    if (!anySourceExists) {
+      debugFail("downloadSelectedDateLogToUSB", "No daily archive files exist for the selected date.");
+    } else if (exportSucceeded) {
+      debugFail("downloadSelectedDateLogToUSB", "Selected date contains no non-empty archive files.");
+    } else {
+      debugFail("downloadSelectedDateLogToUSB", "One or more daily archive files could not be exported.");
+    }
+    return;
+  }
+
+  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_SUCCESS);
+  debugNumber("downloadSelectedDateLogToUSB", "Archive files exported", exportedCount);
+  debugOK("downloadSelectedDateLogToUSB");
 }

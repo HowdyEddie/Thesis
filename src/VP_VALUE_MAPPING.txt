@@ -80,6 +80,8 @@ Current Log:
 - Current-day cards are restored from /daily/YYYY-MM-DD/transactions.csv using
   the RTC date at startup and when the date changes. Up to 40 newest events for
   the active date are held for display; the daily archive remains on SD.
+- Cards display newest-first: card 1 is the latest event. Scrolling down moves
+  toward older events; newly logged events return the view to card 1.
 
 Transaction Log:
 - Base = 0x3000
@@ -91,6 +93,9 @@ Transaction Log:
 - Borrowed Time offset = 0x28, 16 bytes / 8 words
 - Returned Time offset = 0x30, 16 bytes / 8 words
 - User offset = 0x38, 32 bytes / 16 words
+- Rows display newest-first: row 1 is the latest transaction. Scroll controls
+  browse toward newer or older records; selecting an export date is preserved
+  while the transaction view order changes.
 
 Account Page:
 - Account card base = 0x3600
@@ -182,11 +187,19 @@ Page 27 Update Password VP Map
 
 Storage hardware:
 - One SD card on SPI chip select GPIO14.
+- CH376S USB host: SPI chip select GPIO25, active-low interrupt GPIO35.
+- GPIO35 is input-only and has no internal pull-up; verify the CH376S module
+  provides a suitable INT pull-up or install an external pull-up compatible
+  with the module logic voltage.
 - Daily archives: /daily/YYYY-MM-DD/
 - Monthly archives: /monthly/YYYY-MM/
 - Daily and monthly records are mirrored on this same card.
-- The selected-date Download UI remains mapped, but CH376S USB detection and
-  file copying are not implemented; do not treat 0x0004 as an actual export.
+- The selected-date Download button exports non-empty daily CSVs to the USB
+  root using FAT 8.3 filenames YYMMDDA.CSV (accounts), YYMMDDK.CSV (keys),
+  YYMMDDT.CSV (transactions), and YYMMDDR.CSV (returns).
+- Download status 0x0004 reports that one or more archive files were exported
+  and their resulting sizes matched the SD sources; physical verification is
+  still required.
 
 Updated behavior:
 - Registered RFID key returns are scanned on Page 1 and Home Dashboard Pages 2/3.
