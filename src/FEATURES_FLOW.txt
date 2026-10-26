@@ -26,7 +26,10 @@ Hardware and pin assignments
 - RC522 RFID: shared SPI SCK GPIO18, MISO GPIO19, MOSI GPIO23, CS GPIO5,
   reset GPIO4.
 - One microSD module only: shared SPI, chip select GPIO14.
-- CH376S USB interface placeholder: chip select GPIO25.
+- CH376S USB host: SPI chip select GPIO25, interrupt GPIO35, using the
+  Ch376msc library. GPIO35 is input-only and has no internal pull-up; use an
+  external pull-up for the active-low INT line if the module does not provide
+  one.
 - Active-high safety limit switch: GPIO34, external 10k pulldown to GND.
 - 40 slot outputs are driven by three MCP23017 expanders at I2C addresses
   0x20, 0x21, and 0x22. HIGH activates/unlocks an output; LOW locks it.
@@ -35,17 +38,38 @@ No SD select or export-SD select is assigned to GPIO13 or GPIO15.
 
 Startup and main loop
 ---------------------
-1. setup() starts Serial, configures chip-select pins, initializes SPI and
-   DWIN UART, initializes the limit switch, and sets safe default slot states.
-2. The loading page initializes I2C, RTC, the MCP23017 expanders, the single
-   GPIO14 SD card, RFID, fingerprint, QR, and the USB placeholder.
+1. setup() starts Serial, configures chip-select pins, starts I2C with a
+   bounded 100 ms transaction timeout, then initializes the MCP23017
+   expanders before SPI, DWIN, RTC, or other modules. It probes MCP addresses
+   0x20, 0x21, and 0x22 sequentially and reports each result. For each detected
+   MCP, the output latch is written LOW before its pins are configured as
+   outputs.
+2. The loading page reports MCP status, then initializes the RTC, single
+   GPIO14 SD card, CH376S USB host, RFID, fingerprint, and QR scanner.
 3. Maintenance settings, accounts, registered keys, admin PIN, transaction
    history, and available log dates are loaded from persistent storage.
-4. The DWIN opens Page 1 (Locked Screen).
-5. loop() handles DWIN events, safety checks, RTC updates, USB status checks,
+4. Initialization failures are written to Serial with each module name and
+   summarized before startup continues to Page 1 (Locked Screen). Optional
+   QR and CH376S failures do not block startup. QR readiness means its serial
+   interface started; scanner presence is only known after scan data arrives.
+   CH376S runs an SPI CHECK_EXIST probe before library initialization, so an
+   absent controller is reported and skipped rather than entering the
+   library's interrupt-drain loop.
+5. The readiness results are reported for diagnostics only. Slot selection,
+   borrowing, and returns are not gated on SD, RTC, or RFID readiness. Each
+   detected MCP23017 is initialized individually, but all three must be
+   detected for normal slot output control. Firmware drives detected MCP
+   outputs LOW as its earliest initialization action; external pull-downs are
+   still required to keep driver inputs LOW during power-up before firmware
+   can communicate with MCPs. Physical prototype testing confirmed the slot
+   lock outputs now initialize and operate as intended.
+6. loop() handles DWIN events, safety checks, RTC updates, USB status checks,
    idle sleep, fingerprint login on the Locked Screen, RFID return scans on
    the Locked Screen and both Home Dashboard pages, timed slot relocking, and
    QR input while Page 4 is active.
+
+No module-failure or "feature unavailable" status has been added to the DWIN
+interface. Module initialization results are reported through Serial only.
 
 User access and borrowing
 -------------------------
@@ -57,25 +81,38 @@ User access and borrowing
    selection. This single-selection toggle works on both dashboards. The user
    confirms the selection to continue. Slot touch events are identified by
    their VP address; a value of 0x0000 is valid.
-3. Page 4 starts QR scanning automatically. The borrower name is extracted
-   from supported QR text, optionally resolved from /students.csv, or entered
-   with the on-screen keyboard.
-4. Confirming a borrower marks the slot as taken in ESP32 Preferences, adds
-   current-session and transaction log entries, appends daily and monthly SD
-   records, and energizes that slot output.
+3. Page 4 listens for QR data when the QR serial interface is initialized.
+   The scanner itself has no startup presence handshake, so a disconnected
+   scanner does not block the page; the borrower name can still be entered
+   manually with the on-screen keyboard. Scanned codes can optionally resolve
+   through /students.csv.
+   Pressing OK with no borrower name cancels the pending borrow, clears the
+   slot selection, and returns to the dashboard.
+4. Confirming a borrower first appends and verifies the transaction in the
+   daily SD archive. If that commit fails, the borrow is cancelled and the
+   slot state/output remain unchanged. After a successful daily commit, RAM
+   logs/state and the slot output are updated. A failed monthly mirror is
+   queued for periodic retry and rechecked against daily archives at startup.
 5. The slot output automatically returns to the locked level after
    RETURN_UNLOCK_MS. The slot remains marked occupied until its registered
    RFID key is scanned on Page 1, 2, or 3.
 
 RFID return flow
 ----------------
-1. RFID is polled on the Locked Screen and Home Dashboard pages.
+1. RFID returns are polled only on Home Dashboard Pages 2 and 3, not on the
+   Locked Screen.
 2. The scanned UID must match a registered key whose slot is currently marked
    taken. Unknown keys and keys for unoccupied slots do not change the locker.
-3. The matching slot is marked available in Preferences, its output is
-   activated for RETURN_UNLOCK_MS, and the output is then relocked.
-4. Current logs, the transaction history, and SD audit files receive a return
-   record. Repeat scans of the same UID are rate-limited.
+3. The return transaction must first be appended and verified in the daily SD
+   archive. If that commit fails, the return is cancelled and the slot remains
+   borrowed/locked. After a successful daily commit, the slot is marked
+   available in Preferences, its output is activated for RETURN_UNLOCK_MS,
+   and the output is then relocked.
+4. Current logs and transaction history receive the committed return record.
+   Monthly archive mirrors are retried if needed. The auxiliary returns.csv
+   row is also written; its failure is reported without undoing a return whose
+   authoritative transaction row was already committed. Repeat scans of the
+   same UID are rate-limited after a successful return.
 
 Admin flow and pages
 --------------------
@@ -117,6 +154,17 @@ Admin Dashboard. Current-log cards are rebuilt from the RTC day's transaction
 archive during startup and when the RTC date changes. They therefore survive
 a power cycle as long as SD writes succeeded and the same card is available.
 The current-log display retains the newest 40 events for the active date.
+The daily transactions.csv file is authoritative for borrow/return commits:
+the firmware verifies the daily row before changing slot state or activating
+an output. Monthly files are mirrors; failed mirror writes are queued for
+periodic retry and missing rows are discovered from daily archives on startup.
+Current-log cards and Admin Dashboard transaction rows are presented
+newest-first; the CSV archive itself remains append-only and chronological.
+The first visible card/row is the latest event, so recent activity is visible
+without scrolling. Current-log scrolling moves toward older events. Transaction
+scrolling can browse older/newer events; when a new event is logged while the
+Admin Dashboard is showing today's date, the table returns to the latest row.
+The selected date remains unchanged for USB export.
 
 Existing root-level accounts.csv, keys.csv, transactions.csv, and returns.csv
 are migrated into the matching daily and monthly folders on startup. The
@@ -158,14 +206,33 @@ Safety and display idle
 - A DWIN Return Key Code / Basic Touch object using VP 0x13F0 can provide a
   dedicated wake touch. The first touch while asleep wakes only the display.
 
-Download status and known hardware dependency
+USB download
 ----------------------------------------------
-The selected-date USB download workflow is not complete. usbHostConnected()
-currently reports no drive, and no CH376S disk-detection or file-copy
-protocol/library is configured in this project. The download button therefore
-does not export data; the SD archive remains available by removing the card
-and reading it on a computer. Do not treat a displayed download-success value
-as confirmation of an actual USB copy.
+The CH376S is initialized with the Ch376msc library, detects insertion/removal
+through its interrupt, and checks that the USB drive is mounted before export.
+On the Admin Dashboard, select a date and press Download to copy the
+non-empty daily CSV files from /daily/YYYY-MM-DD/ to the USB drive root:
+
+  YYMMDDA.CSV - accounts
+  YYMMDDK.CSV - key registrations
+  YYMMDDT.CSV - transactions
+  YYMMDDR.CSV - RFID returns
+
+The actual filenames have no spaces (for example, 261019T.CSV). This short
+8.3 naming format is used for CH376S compatibility. The YY date prefix means
+files from the same month/day in different centuries could collide; the
+project's current year range does not approach that limit. Existing matching
+files on the USB drive are replaced. Missing and empty daily category files
+are skipped. The DWIN status reports success only if at least one non-empty
+archive was copied, all attempted copies completed, and each exported file's
+USB size matches the corresponding SD source size.
+
+The CH376S shares SPI pins with the SD card and RFID reader. Their chip-select
+lines must remain inactive during another device's SPI operation. GPIO35 has
+no ESP32 internal pull-up, so verify that the module provides a suitable
+pull-up on INT; otherwise add an external pull-up compatible with the module's
+logic voltage. Validate drive power and filesystem compatibility using the
+module/library documentation and a known-good USB drive.
 
 RTC setup
 ---------

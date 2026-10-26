@@ -4,10 +4,9 @@
   Display: DWIN DMG80480Y070_02NR
   Project style:
     - Main config and globals are in this file.
-    - Feature code is separated into multiple .ino tabs.
+    - Feature implementation headers are included once below.
 
-  Open this file in Arduino IDE:
-    DWIN_SmartLocker_Full_Modular_FinalIntegrated.ino
+  Build this PlatformIO project for the esp32dev environment.
 
   Important:
     Install these libraries in Arduino IDE Library Manager when needed:
@@ -29,6 +28,7 @@
 #include <Adafruit_Fingerprint.h>
 #include <MFRC522.h>
 #include <RTClib.h>
+#include <Ch376msc.h>
 
 // QR scanner SoftwareSerial
 // This is intentionally forced instead of using __has_include().
@@ -80,7 +80,8 @@
 #define RFID_RST   4
 
 #define SD_STORAGE_CS  14
-#define USB_CS       25   // CH376S SPI chip select
+#define USB_CS       13   // CH376S SPI chip select
+#define USB_INT      25   // CH376S active-low interrupt; GPIO25 needs external pull-up
 
 // One limit switch safety input.
 // GPIO34 is input-only and available in this project.
@@ -309,6 +310,7 @@
 #define VP_DOWNLOAD_ICON       0x34E0
 
 #define DATE_CARD_BYTES        16
+#define MAX_PENDING_MONTHLY_MIRRORS 120
 
 // Account page
 #define VP_ACCOUNT_CARD_BASE        0x3600
@@ -445,6 +447,12 @@ struct TransactionLogEntry {
   String dateText;
 };
 
+struct PendingMonthlyMirror {
+  String dateText;
+  String fileName;
+  String line;
+};
+
 struct AccountEntry {
   String userNumber;
   String userName;
@@ -483,6 +491,7 @@ Adafruit_Fingerprint finger = Adafruit_Fingerprint(&FPSSerial);
 
 RTC_DS3231 rtc;
 MFRC522 rfid(RFID_CS, RFID_RST);
+Ch376msc flashDrive(USB_CS, USB_INT);
 
 Adafruit_MCP23X17 mcp1;
 Adafruit_MCP23X17 mcp2;
@@ -526,6 +535,10 @@ unsigned long lastCurrentLogDateSyncCheck = 0;
 TransactionLogEntry transactionLogs[MAX_TRANSACTION_LOGS];
 uint8_t transactionLogCount = 0;
 uint8_t transactionLogOffset = 0;
+
+PendingMonthlyMirror pendingMonthlyMirrors[MAX_PENDING_MONTHLY_MIRRORS];
+uint8_t pendingMonthlyMirrorCount = 0;
+unsigned long lastMonthlyMirrorRetry = 0;
 
 String dateLogs[MAX_DATE_LOGS];
 uint8_t dateLogCount = 0;
@@ -668,11 +681,14 @@ bool handleTransactionLogControls(uint16_t vp, uint16_t value);
 void initDateLogs();
 bool loadLogsFromSD();
 bool ensureArchiveDirectory(const String &path);
+bool retryPendingMonthlyMirrors();
+void queuePendingMonthlyMirror(const String &dateText, const String &fileName, const String &line);
+void queueMissingMonthlyMirrorsForDate(const String &dateText);
 void renderDateCards();
 String csvEscapeField(const String &field);
 bool parseCSVFields(String line, String *fields, uint8_t fieldCount);
 bool handleDateCards(uint16_t vp, uint16_t value);
-void addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText);
+bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText);
 void addDateLogIfMissing(String dateText);
 
 // Keyboard
@@ -786,7 +802,7 @@ bool initRFIDModule();
 String readRFIDTagOnce();
 String waitForRFIDTag(uint32_t timeoutMs);
 void checkLockedScreenRFIDReturn();
-void markRegisteredKeyReturned(uint8_t keyIndex);
+bool markRegisteredKeyReturned(uint8_t keyIndex);
 void updateReturnUnlockRelock();
 void startTimedSlotUnlock(uint8_t slotIndex);
 
@@ -849,9 +865,12 @@ void downloadSelectedDateLogToUSB();
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);  
 
   initHardwarePins();
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setTimeOut(100);
+  initIOExpanders();
+
   SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
   
   Serial.println();
@@ -880,6 +899,7 @@ void loop() {
 
   updateRTCDisplay();
   syncCurrentLogsWithRTCDate();
+  retryPendingMonthlyMirrors();
   monitorUSBInsertion();
   handleDisplayIdleSleep();
 
@@ -889,7 +909,9 @@ void loop() {
     if (currentPage == PAGE_LOCKED_SCREEN) {
       checkLockedScreenFingerprint();
     }
-    checkLockedScreenRFIDReturn();
+    if (currentPage == PAGE_HOME_DASHBOARD_A || currentPage == PAGE_HOME_DASHBOARD_B) {
+      checkLockedScreenRFIDReturn();
+    }
   }
 
   updateReturnUnlockRelock();

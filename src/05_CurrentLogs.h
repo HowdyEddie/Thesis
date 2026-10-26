@@ -22,7 +22,8 @@ void initCurrentLogs() {
 /*
   Function: addCurrentLog()
   Description:
-    Adds one current log entry to RAM.
+    Adds one current log entry to RAM. Rendering is newest-first, so a new
+    event resets the view to the first card.
 
   How to use:
     Call this after a real borrow/return action.
@@ -43,6 +44,7 @@ void addCurrentLog(String keyName, String borrowerName, String keyNumber, String
   currentLogs[currentLogCount].timeText = timeText;
   currentLogs[currentLogCount].statusIcon = statusIcon;
   currentLogCount++;
+  currentLogOffset = 0;
 
   if (currentPage == PAGE_LOCKED_SCREEN) {
     renderCurrentLogs(CURRENT_LOG_CARDS_6);
@@ -148,13 +150,13 @@ void renderCurrentLogs(uint8_t visibleCards) {
   activeCurrentLogCards = visibleCards;
 
   for (uint8_t card = 0; card < visibleCards; card++) {
-    uint8_t logIndex = currentLogOffset + card;
-
-    if (logIndex >= currentLogCount) {
+    uint16_t visibleIndex = currentLogOffset + card;
+    if (visibleIndex >= currentLogCount) {
       clearCurrentLogCard(card);
       continue;
     }
 
+    uint8_t logIndex = currentLogCount - 1 - visibleIndex;
     uint16_t base = VP_LOG_BASE + (card * LOG_CARD_STEP);
 
     writeVPText(base + LOG_KEYNAME_OFFSET, currentLogs[logIndex].keyName.c_str(), LOG_KEYNAME_BYTES);

@@ -64,12 +64,24 @@ void addDateLogIfMissing(String dateText) {
 /*
   Function: addTransactionLog()
   Description:
-    Adds one real transaction row to RAM and appends it to the daily SD card.
+    Commits the transaction to the authoritative daily SD archive before
+    adding it to RAM. The RAM list remains chronological; rendering presents
+    newest-first.
 
   How to use:
-    Called after a real borrow/return action.
+    Called before slot state or output changes for a borrow/return action.
 */
-void addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText) {
+bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText) {
+  String csvLine = dateText + "," + csvEscapeField(keyNo) + "," +
+                   csvEscapeField(borrowerName) + "," + csvEscapeField(keyName) + "," +
+                   csvEscapeField(borrowedTime) + "," + csvEscapeField(returnedTime) + "," +
+                   csvEscapeField(userName);
+
+  if (!appendLineToDaySD("/transactions.csv", csvLine)) {
+    debugFail("addTransactionLog", "Daily transaction was not committed; locker state was not changed.");
+    return false;
+  }
+
   if (transactionLogCount >= MAX_TRANSACTION_LOGS) {
     for (uint8_t i = 1; i < MAX_TRANSACTION_LOGS; i++) {
       transactionLogs[i - 1] = transactionLogs[i];
@@ -88,17 +100,20 @@ void addTransactionLog(String keyNo, String borrowerName, String keyName, String
 
   addDateLogIfMissing(dateText);
 
-  String csvLine = dateText + "," + csvEscapeField(keyNo) + "," +
-                   csvEscapeField(borrowerName) + "," + csvEscapeField(keyName) + "," +
-                   csvEscapeField(borrowedTime) + "," + csvEscapeField(returnedTime) + "," +
-                   csvEscapeField(userName);
-
-  appendLineToDaySD("/transactions.csv", csvLine);
-
   if (currentPage == PAGE_ADMIN_DASHBOARD) {
+    if (selectedDateText == dateText) {
+      transactionLogOffset = 0;
+    } else {
+      uint16_t maxOffset = transactionLogCount > TRANS_VISIBLE_ROWS
+          ? transactionLogCount - TRANS_VISIBLE_ROWS
+          : 0;
+      if (transactionLogOffset < maxOffset) transactionLogOffset++;
+    }
     renderTransactionLogs();
     renderDateCards();
   }
+
+  return true;
 }
 
 /*
@@ -111,13 +126,13 @@ void addTransactionLog(String keyNo, String borrowerName, String keyName, String
 */
 void renderTransactionLogs() {
   for (uint8_t row = 0; row < TRANS_VISIBLE_ROWS; row++) {
-    uint8_t logIndex = transactionLogOffset + row;
-
-    if (logIndex >= transactionLogCount) {
+    uint16_t visibleIndex = transactionLogOffset + row;
+    if (visibleIndex >= transactionLogCount) {
       clearTransactionRow(row);
       continue;
     }
 
+    uint8_t logIndex = transactionLogCount - 1 - visibleIndex;
     uint16_t base = VP_TRANS_BASE + (row * TRANS_ROW_STEP);
 
     writeVPText(base + TRANS_KEYNO_OFFSET, transactionLogs[logIndex].keyNo.c_str(), TRANS_KEYNO_BYTES);
@@ -178,7 +193,7 @@ bool handleTransactionLogControls(uint16_t vp, uint16_t value) {
 /*
   Function: scrollTransactionLogsUp()
   Description:
-    Scrolls transaction logs upward.
+    Scrolls toward newer transaction rows.
 
   How to use:
     Called by VP_TRANS_SCROLL_UP.
@@ -193,7 +208,7 @@ void scrollTransactionLogsUp() {
 /*
   Function: scrollTransactionLogsDown()
   Description:
-    Scrolls transaction logs downward.
+    Scrolls toward older transaction rows.
 
   How to use:
     Called by VP_TRANS_SCROLL_DOWN.

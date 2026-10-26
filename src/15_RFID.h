@@ -97,12 +97,12 @@ String waitForRFIDTag(uint32_t timeoutMs) {
 /*
   Function: checkLockedScreenRFIDReturn()
   Description:
-    Automatically scans RFID on the Locked Screen and Home Dashboards.
-    If the UID belongs to a registered key, the matching slot unlocks
-    and the key is marked as returned.
+    Automatically scans RFID on Home Dashboard Pages 2/3 only. If the UID
+    belongs to a registered key, the matching slot unlocks and the key is
+    marked as returned.
 
   How to use:
-    Called in loop() while Page 1, 2, or 3 is active.
+    Called in loop() while Home Dashboard Page 2 or 3 is active.
 */
 void checkLockedScreenRFIDReturn() {
   if (!rfidReady) return;
@@ -132,10 +132,10 @@ void checkLockedScreenRFIDReturn() {
     return;
   }
 
-  lastReturnedRFIDUID = uid;
-  lastRFIDReturnAction = millis();
-
-  markRegisteredKeyReturned((uint8_t)keyIndex);
+  if (markRegisteredKeyReturned((uint8_t)keyIndex)) {
+    lastReturnedRFIDUID = uid;
+    lastRFIDReturnAction = millis();
+  }
 }
 
 /*
@@ -147,16 +147,36 @@ void checkLockedScreenRFIDReturn() {
   How to use:
     markRegisteredKeyReturned(keyIndex);
 */
-void markRegisteredKeyReturned(uint8_t keyIndex) {
-  if (keyIndex >= MAX_KEYS || !registeredKeys[keyIndex].used) return;
+bool markRegisteredKeyReturned(uint8_t keyIndex) {
+  if (keyIndex >= MAX_KEYS || !registeredKeys[keyIndex].used) return false;
 
   uint8_t slotNumber = registeredKeys[keyIndex].slotNumber;
-  if (slotNumber < 1 || slotNumber > SLOT_COUNT) return;
+  if (slotNumber < 1 || slotNumber > SLOT_COUNT) return false;
 
   uint8_t slotIndex = slotNumber - 1;
 
   String returnedTime = getRTCTimeString();
   String today = getRTCDateString();
+
+  if (!addTransactionLog(
+          registeredKeys[keyIndex].keyNumber,
+          "Returned",
+          registeredKeys[keyIndex].keyName,
+          "--:--",
+          returnedTime,
+          "RFID Return",
+          today)) {
+    debugFail("markRegisteredKeyReturned", "Return cancelled because the daily transaction could not be committed.");
+    return false;
+  }
+
+  addCurrentLog(
+    registeredKeys[keyIndex].keyName,
+    "Returned",
+    registeredKeys[keyIndex].keyNumber,
+    returnedTime,
+    LOG_STATUS_RETURNED
+  );
 
   setSlotLockOutput(slotIndex, true);
   startTimedSlotUnlock(slotIndex);
@@ -167,34 +187,19 @@ void markRegisteredKeyReturned(uint8_t keyIndex) {
   slotSelected[slotIndex] = false;
   updateSlotDisplay(slotIndex);
 
-  addCurrentLog(
-    registeredKeys[keyIndex].keyName,
-    "Returned",
-    registeredKeys[keyIndex].keyNumber,
-    returnedTime,
-    LOG_STATUS_RETURNED
-  );
-
-  addTransactionLog(
-    registeredKeys[keyIndex].keyNumber,
-    "Returned",
-    registeredKeys[keyIndex].keyName,
-    "--:--",
-    returnedTime,
-    "RFID Return",
-    today
-  );
-
   String line = today + "," + returnedTime + "," +
                 String(slotNumber) + "," +
                 csvEscapeField(registeredKeys[keyIndex].keyName) + "," +
                 csvEscapeField(registeredKeys[keyIndex].keyNumber) + "," +
                 csvEscapeField(normalizeRFIDUID(registeredKeys[keyIndex].rfidUID));
 
-  appendLineToDaySD("/returns.csv", line);
+  if (!appendLineToDaySD("/returns.csv", line)) {
+    debugFail("markRegisteredKeyReturned", "Transaction is committed and slot returned, but the auxiliary returns.csv row was not saved.");
+  }
 
   debugNumber("markRegisteredKeyReturned", "Returned slot", slotNumber);
   debugValue("markRegisteredKeyReturned", "Returned key", registeredKeys[keyIndex].keyName);
+  return true;
 }
 
 /*

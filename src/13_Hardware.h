@@ -12,8 +12,6 @@
     Called in setup().
 */
 void initHardwarePins() {
-  debugLog("initHardwarePins", "Setting chip-select pins to OUTPUT/HIGH.");
-
   pinMode(RFID_CS, OUTPUT);
   pinMode(SD_STORAGE_CS, OUTPUT);
   pinMode(USB_CS, OUTPUT);
@@ -21,10 +19,6 @@ void initHardwarePins() {
   digitalWrite(RFID_CS, HIGH);
   digitalWrite(SD_STORAGE_CS, HIGH);
   digitalWrite(USB_CS, HIGH);
-  
-  delay(100);
-  //SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-  debugOK("initHardwarePins");
 }
 
 /*
@@ -33,34 +27,41 @@ void initHardwarePins() {
     Starts the 3 CJMCU-2317/MCP23017 I2C expanders.
 
   How to use:
-    Called during loading screen.
+    Called at the beginning of setup(), before other modules initialize.
 */
 bool initIOExpanders() {
-  debugLog("initIOExpanders", "Starting MCP23017 detection.");
-
-  bool ok1 = mcp1.begin_I2C(MCP1_ADDR, &Wire);
-  bool ok2 = mcp2.begin_I2C(MCP2_ADDR, &Wire);
-  bool ok3 = mcp3.begin_I2C(MCP3_ADDR, &Wire);
-
+  bool ok1 = mcp1.begin_I2C(MCP1_ADDR);
   debugValue("initIOExpanders", "MCP1 0x20", ok1 ? "FOUND" : "NOT FOUND");
+  if (ok1) {
+    mcp1.writeGPIOAB(0x0000);
+    for (uint8_t pin = 0; pin < 16; pin++) {
+      mcp1.pinMode(pin, OUTPUT);
+    }
+  }
+
+  bool ok2 = mcp2.begin_I2C(MCP2_ADDR);
   debugValue("initIOExpanders", "MCP2 0x21", ok2 ? "FOUND" : "NOT FOUND");
+  if (ok2) {
+    mcp2.writeGPIOAB(0x0000);
+    for (uint8_t pin = 0; pin < 16; pin++) {
+      mcp2.pinMode(pin, OUTPUT);
+    }
+  }
+
+  bool ok3 = mcp3.begin_I2C(MCP3_ADDR);
   debugValue("initIOExpanders", "MCP3 0x22", ok3 ? "FOUND" : "NOT FOUND");
+  if (ok3) {
+    mcp3.writeGPIOAB(0x0000);
+    for (uint8_t pin = 0; pin < 16; pin++) {
+      mcp3.pinMode(pin, OUTPUT);
+    }
+  }
 
   mcpReady = ok1 && ok2 && ok3;
 
   if (!mcpReady) {
-    debugFail("initIOExpanders", "One or more MCP23017 expanders not found.");
+    debugFail("initIOExpanders", "One or more MCP23017 expanders not found; detected expanders were initialized LOW.");
     return false;
-  }
-
-  for (uint8_t pin = 0; pin < 16; pin++) {
-    mcp1.pinMode(pin, OUTPUT);
-    mcp2.pinMode(pin, OUTPUT);
-    mcp3.pinMode(pin, OUTPUT);
-
-    mcp1.digitalWrite(pin, LOCK_INACTIVE_LEVEL);
-    mcp2.digitalWrite(pin, LOCK_INACTIVE_LEVEL);
-    mcp3.digitalWrite(pin, LOCK_INACTIVE_LEVEL);
   }
 
   debugOK("initIOExpanders");

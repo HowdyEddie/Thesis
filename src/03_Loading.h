@@ -3,61 +3,91 @@
 // Real loading screen with progress icon.
 // =======================================================
 
+const uint8_t MAX_STARTUP_FAILURES = 8;
+const char *startupFailureModules[MAX_STARTUP_FAILURES];
+uint8_t startupFailureCount = 0;
+
+void reportStartupModuleStatus(const char *moduleName, bool ready) {
+  Serial.print("[STARTUP] ");
+  Serial.print(moduleName);
+  Serial.println(ready ? ": READY" : ": FAILED");
+
+  if (!ready && startupFailureCount < MAX_STARTUP_FAILURES) {
+    startupFailureModules[startupFailureCount++] = moduleName;
+  }
+}
+
+void reportStartupFailureSummary() {
+  if (startupFailureCount == 0) {
+    Serial.println("[STARTUP] All probed modules initialized.");
+    return;
+  }
+
+  Serial.println("[STARTUP] Failed modules:");
+  for (uint8_t i = 0; i < startupFailureCount; i++) {
+    Serial.print("  - ");
+    Serial.println(startupFailureModules[i]);
+  }
+  Serial.println("[STARTUP] Continuing to the Locked Screen in safe mode.");
+}
+
 /*
   Function: runLoadingScreen()
   Description:
-    Opens Page 0, initializes required modules, updates the progress icon,
-    loads saved data, then goes to the locked screen.
+    Attempts each module initialization, reports failures to Serial, loads
+    persistent data where available, and always proceeds to the Locked Screen.
 
   How to use:
     Called once in setup().
 */
 void runLoadingScreen() {
   debugLog("runLoadingScreen", "Starting hardware and data initialization.");
+  startupFailureCount = 0;
   currentPage = PAGE_LOADING;
   changePage(PAGE_LOADING);
   delay(300);
-
   writeVPWord(VP_PROGRESS_ICON, 0);
-
-  Wire.begin(I2C_SDA, I2C_SCL);
-  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
 
   writeVPWord(VP_PROGRESS_ICON, 10);
   delay(100);
 
-  debugLog("runLoadingScreen", "Initializing RTC module...");
-  initRTCModule();
-  writeVPWord(VP_PROGRESS_ICON, 25);
+  debugLog("runLoadingScreen", "Reporting MCP23017 startup status...");
+  reportStartupModuleStatus("MCP23017 slot expanders", mcpReady);
+  writeVPWord(VP_PROGRESS_ICON, 20);
   delay(100);
 
-  debugLog("runLoadingScreen", "Initializing MCP23017 expanders...");
-  initIOExpanders();
+  debugLog("runLoadingScreen", "Initializing RTC module...");
+  reportStartupModuleStatus("DS3231 RTC", initRTCModule());
+  writeVPWord(VP_PROGRESS_ICON, 30);
+  delay(100);
+
   writeVPWord(VP_PROGRESS_ICON, 40);
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing SD storage...");
-  initStorageModules();
+  bool storageInitialized = initStorageModules();
+  reportStartupModuleStatus("GPIO14 SD card", storageInitialized);
   writeVPWord(VP_PROGRESS_ICON, 55);
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing CH376S USB host...");
-  initUSBHost();
+  reportStartupModuleStatus("CH376S USB host (CS 25 / INT 35)", initUSBHost());
   writeVPWord(VP_PROGRESS_ICON, 65);
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing RC522 RFID...");
-  initRFIDModule();
+  reportStartupModuleStatus("RC522 RFID reader", initRFIDModule());
   writeVPWord(VP_PROGRESS_ICON, 75);
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing fingerprint sensor...");
-  initFingerprintModule();
+  reportStartupModuleStatus("R503 fingerprint sensor", initFingerprintModule());
   writeVPWord(VP_PROGRESS_ICON, 85);
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing QR scanner...");
-  initQRScanner();
+  reportStartupModuleStatus("QR scanner serial interface", initQRScanner());
+  Serial.println("[STARTUP] QR scanner presence is checked when scan data is received; manual name entry is available.");
   writeVPWord(VP_PROGRESS_ICON, 90);
   delay(100);
 
@@ -70,7 +100,9 @@ void runLoadingScreen() {
   debugLog("runLoadingScreen", "Preparing date log cards...");
   initDateLogs();
   debugLog("runLoadingScreen", "Loading saved daily transaction history...");
-  loadLogsFromSD();
+  bool transactionHistoryLoaded = loadLogsFromSD();
+  storageSDReady = storageInitialized && storageSDReady && transactionHistoryLoaded;
+  reportStartupModuleStatus("SD archive/history readiness", storageSDReady);
   debugLog("runLoadingScreen", "Loading saved admin PIN...");
   loadAdminPINFromPreferences();
 
@@ -82,6 +114,7 @@ void runLoadingScreen() {
   writeVPWord(VP_PROGRESS_ICON, 99);
   delay(500);
 
+  reportStartupFailureSummary();
   debugOK("runLoadingScreen");
   goToLockedScreen();
 }

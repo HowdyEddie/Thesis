@@ -1,7 +1,7 @@
 SMARTLOCKER STORAGE - PROJECT PROGRESS
 =====================================
 
-UPDATED: 2026-10-19
+UPDATED: 2026-10-26 (20:29)
 PURPOSE: Compact handoff/progress record aligned with the project conversation.
 PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
 
@@ -31,6 +31,14 @@ CURRENT PROJECT STATE
 [DONE] Latest PlatformIO build succeeded on 2026-10-11 after current-log
        restoration, safety-switch, and dashboard slot-toggle changes.
        RAM: 47,032 bytes; flash: 461,209 bytes.
+[DONE] CH376S support integrated with djuseeq/Ch376msc 1.4.5 using CS GPIO25
+       and INT GPIO35. The firmware now initializes/detects the controller,
+       polls insertion/removal, and exports selected-date daily CSV archives
+       to 8.3 filenames on the USB root, replacing prior copies and verifying
+       exported file sizes against their SD sources.
+[DONE] PlatformIO build succeeded on 2026-10-19 with the CH376msc dependency.
+       RAM: 47,136 bytes; latest flash: 471,469 bytes. Compile verification
+       only; physical USB hardware has not yet been tested.
 [DONE] GitHub Actions PlatformIO build workflow and issue/pull-request
        templates are added. Hosted esp32dev build passed on 2026-10-19
        (GitHub Actions run #2); this verifies compilation only, not hardware.
@@ -54,6 +62,58 @@ CURRENT PROJECT STATE
 [PENDING] Physical testing found the previous dashboard behavior did not
           deselect on a repeat tap. Updated toggle code now compiles, but the
           corrected behavior still needs retesting on both dashboard pages.
+[DONE] Current-log cards and Admin Dashboard transaction rows now render
+       newest-first without reordering the append-only SD CSV archives.
+       Current logs reset to the newest card when a new event arrives.
+       Admin rows return to newest when the selected date matches the event;
+       otherwise their visible scroll position is kept and the selected export
+       date remains unchanged.
+[DONE] Newest-first display changes compile successfully on 2026-10-22.
+       RAM: 47,136 bytes; flash: 471,521 bytes.
+[PENDING] Physical verification is still needed for card/row order and
+          scrolling behavior.
+[DONE] Startup now records module initialization results to Serial, summarizes
+       failures, and proceeds to the Locked Screen. No module-unavailable UI
+       was added. The I2C bus uses a 100 ms transaction timeout.
+[DONE] CH376S now receives an SPI CHECK_EXIST pre-probe before the library's
+       init routine. If absent, initialization is skipped and the USB failure
+       is reported, preventing the library's interrupt-drain loop from
+       blocking startup.
+[DONE] Startup fail-soft and module-reporting changes compile on 2026-10-22.
+       Latest build after reverting hardware-readiness gates: RAM: 47,176
+       bytes; flash: 472,949 bytes.
+[REVERTED] The combined hardware-readiness gates on slot selection,
+           borrowing, and RFID returns were removed at the user's request.
+           MCP output readiness is still tracked; startup failure reporting
+           and fail-soft navigation remain enabled.
+[PENDING] Startup failure reporting and fail-soft navigation need physical
+          testing with modules disconnected one at a time. QR serial startup
+          does not prove a scanner is attached; physical presence is only
+          evident after scanner data is received.
+[DONE] Startup now initializes the I2C bus and detected MCP23017 expanders
+       before SPI, DWIN, RTC, or other modules. Each detected expander's output
+       latch is written LOW before output mode is enabled. Startup delays
+       before MCP initialization were removed. Build passed on 2026-10-23:
+       RAM 47,176 bytes; flash 472,681 bytes.
+[DONE] MCP startup follows the provided reference's address-by-address
+       initialization using the default Wire bus. Each detection result is
+       reported before proceeding to the next address; all 16 pins on a
+       detected expander are configured as outputs after preloading LOW.
+       Build passed on 2026-10-24: RAM 47,176 bytes; flash 472,697 bytes.
+[DONE] Physical prototype test confirmed the slot locks now behave as
+       intended: MCP outputs initialize LOW/inactive and lock operation works.
+[DONE] Borrow and RFID-return transactions now require a verified daily
+       transactions.csv append before slot state or lock outputs change. The
+       monthly archive is treated as a mirror: failed writes are queued for
+       periodic retry, with daily archives reconciled on startup.
+[DONE] RFID returns are documented as Home Dashboard-only (Pages 2/3), not
+       available on the Locked Screen, matching the requested behavior.
+       PlatformIO build passed on 2026-10-26: RAM 52,944 bytes; flash
+       475,729 bytes.
+[LIMITATION] MCP outputs cannot be driven by firmware until power is stable
+             and I2C communication starts. Add suitable external pull-downs
+             at lock-driver inputs if they must remain LOW during that power-up
+             interval before firmware initializes the MCPs.
 [DONE] Project feature/flow guide and DWIN VP map are in FEATURES_FLOW.txt and
        VP_VALUE_MAPPING.txt.
 [DONE] Progress through the conversation: .ino integration was replaced by
@@ -78,6 +138,20 @@ UPCOMING WORK - PRIORITY ORDER
 ------------------------------
 1. [PENDING] Run a physical hardware acceptance test before treating locker
    operation as field-ready:
+   - Disconnect each module/sensor one at a time at startup. Confirm Serial
+     names the failure and the DWIN reaches Page 1 without hanging.
+   - Confirm missing CH376S is reported but does not prevent boot or manual
+     borrower entry when the other required locker hardware is present.
+   - Test CH376S absent with CS GPIO25 and INT GPIO35 wired as configured;
+     verify SPI pre-probe reports no controller and startup reaches Page 1.
+   - Record which modules are available when testing partial-hardware startup;
+     module readiness is reported to Serial, but slot operations are not gated
+     on SD, RTC, or RFID readiness.
+   - Remove SD/write access during a borrow and RFID return; verify both
+     operations remain cancelled and no slot state/output changes unless the
+     daily transaction row can be written and verified.
+   - Test monthly archive write failure, then restore SD access and verify
+     pending mirrors retry during runtime and are reconciled after reboot.
    - Confirm GPIO14 SD initialization, writing, and card-removal behavior.
    - Test daily/monthly CSV creation, quoted CSV fields, reboot history reload,
      and legacy root-file migration on a backed-up test card.
@@ -85,6 +159,8 @@ UPCOMING WORK - PRIORITY ORDER
    - Verify RFID returns on Locked Screen and both Home Dashboard pages.
    - Power-cycle and verify today's current-log cards and occupied/available
      slot states persist as intended.
+   - Verify current-log and Admin transaction displays show the newest
+     borrow/return first, with scroll controls reaching older and newer rows.
    - Change or advance the RTC across midnight and verify the current-log view
      changes to the new day's archive without deleting prior-day files.
    - Exercise QR/manual borrower entry, optional roster lookup, admin access,
@@ -103,10 +179,15 @@ UPCOMING WORK - PRIORITY ORDER
    - Add a repeatable test checklist for slot selection, limit-switch
      interruption, borrow/return, reboot recovery, and date rollover.
    - Back up the SD card before reset/migration testing and retain test logs.
-3. [PENDING] Decide and implement the USB export workflow. Confirm the exact
-   CH376S hardware/interface and required export behavior, then add and test
-   real drive detection and file copying. Until then, USB export is not
-   implemented and a displayed success state is not proof of a copied file.
+3. [PENDING] Physically verify CH376S USB export using the tested module and
+   a known-good FAT32 drive:
+   - Wire CS GPIO25 and INT GPIO35; verify the INT pull-up (GPIO35 has no
+     internal pull-up) and module power/logic-level requirements.
+   - Check startup CH376S detection and USB insertion/removal status updates.
+   - Export a selected date and confirm the USB root contains the expected
+     YYMMDDA/K/T/R.CSV files with data matching the SD daily archives.
+   - Retry the same date to verify replacement, then test missing/empty
+     category files, USB removal during export, and low-space/error reporting.
 4. [SUGGESTED] Review deployment security: replace the default admin PIN
    (3030) before deployment and define a secure first-run/admin recovery
    procedure.
@@ -118,11 +199,15 @@ UPCOMING WORK - PRIORITY ORDER
 
 KNOWN LIMITATIONS / DO NOT CLAIM
 --------------------------------
-[LIMITATION] CH376S USB detection and file export are placeholders, not a
-             working feature.
-[PENDING]    Firmware has compile verification, but no physical-device test
-             results are recorded here for the RTC current-log restore or the
-             latest dashboard selection toggle.
+[PENDING]    CH376S download code is compile-verified but has not yet been
+             physically tested with the SmartLocker hardware and USB drive.
+[LIMITATION] GPIO35 has no internal ESP32 pull-up. The CH376S INT line must
+             have a suitable module-provided or external pull-up.
+[PENDING]    Firmware has compile verification, but physical-device results
+             are still needed for RTC current-log restore, dashboard selection,
+             newest-first log views, startup fail-soft behavior, and USB export.
+[DONE]       Physical prototype confirmed the MCP slot-lock startup/output
+             behavior. Other hardware behaviors listed above remain pending.
 [LIMITATION] Do not enable resetEverythingForActualProject() during normal
              operation; it is destructive to stored project data.
 
