@@ -64,13 +64,24 @@ void addDateLogIfMissing(String dateText) {
 /*
   Function: addTransactionLog()
   Description:
-    Adds one real transaction row to RAM and appends it to the daily SD card.
-    The RAM list remains chronological; rendering presents newest-first.
+    Commits the transaction to the authoritative daily SD archive before
+    adding it to RAM. The RAM list remains chronological; rendering presents
+    newest-first.
 
   How to use:
-    Called after a real borrow/return action.
+    Called before slot state or output changes for a borrow/return action.
 */
-void addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText) {
+bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText) {
+  String csvLine = dateText + "," + csvEscapeField(keyNo) + "," +
+                   csvEscapeField(borrowerName) + "," + csvEscapeField(keyName) + "," +
+                   csvEscapeField(borrowedTime) + "," + csvEscapeField(returnedTime) + "," +
+                   csvEscapeField(userName);
+
+  if (!appendLineToDaySD("/transactions.csv", csvLine)) {
+    debugFail("addTransactionLog", "Daily transaction was not committed; locker state was not changed.");
+    return false;
+  }
+
   if (transactionLogCount >= MAX_TRANSACTION_LOGS) {
     for (uint8_t i = 1; i < MAX_TRANSACTION_LOGS; i++) {
       transactionLogs[i - 1] = transactionLogs[i];
@@ -89,13 +100,6 @@ void addTransactionLog(String keyNo, String borrowerName, String keyName, String
 
   addDateLogIfMissing(dateText);
 
-  String csvLine = dateText + "," + csvEscapeField(keyNo) + "," +
-                   csvEscapeField(borrowerName) + "," + csvEscapeField(keyName) + "," +
-                   csvEscapeField(borrowedTime) + "," + csvEscapeField(returnedTime) + "," +
-                   csvEscapeField(userName);
-
-  appendLineToDaySD("/transactions.csv", csvLine);
-
   if (currentPage == PAGE_ADMIN_DASHBOARD) {
     if (selectedDateText == dateText) {
       transactionLogOffset = 0;
@@ -108,6 +112,8 @@ void addTransactionLog(String keyNo, String borrowerName, String keyName, String
     renderTransactionLogs();
     renderDateCards();
   }
+
+  return true;
 }
 
 /*

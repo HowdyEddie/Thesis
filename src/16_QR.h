@@ -546,9 +546,8 @@ void confirmBorrowerIdentity() {
   }
 
   if (pendingBorrowerName.length() == 0) {
-    writeVPText(VP_QR_STATUS_TEXT, "Enter borrower name", 32);
-    writeVPWord(VP_QR_STATUS_ICON, QR_ICON_ERROR);
-    debugFail("confirmBorrowerIdentity", "Borrower name is empty.");
+    debugLog("confirmBorrowerIdentity", "Borrower name is empty; cancelling borrow and clearing the selected slot.");
+    cancelQRBorrowerPage();
     return;
   }
 
@@ -572,8 +571,14 @@ void confirmBorrowerIdentity() {
 
   String transactionUser = currentHomeUserName.length() > 0 ? currentHomeUserName : "Unknown";
 
+  if (!addTransactionLog(keyNumber, pendingBorrowerName, keyName, borrowedTime, "--:--", transactionUser, today)) {
+    writeVPText(VP_QR_STATUS_TEXT, "Log save failed", 32);
+    writeVPWord(VP_QR_STATUS_ICON, QR_ICON_ERROR);
+    debugFail("confirmBorrowerIdentity", "Borrow cancelled because the daily transaction could not be committed.");
+    return;
+  }
+
   addCurrentLog(keyName, pendingBorrowerName, keyNumber, borrowedTime, LOG_STATUS_BORROWED);
-  addTransactionLog(keyNumber, pendingBorrowerName, keyName, borrowedTime, "--:--", transactionUser, today);
 
   slotTaken[selectedSlotIndex] = true;
   saveSlotTakenState((uint8_t)selectedSlotIndex);

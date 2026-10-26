@@ -125,9 +125,112 @@ bool archiveContainsLine(const String &path, const String &line) {
 bool appendMountedArchiveLine(const String &path, const String &line) {
   File file = SD.open(path.c_str(), FILE_APPEND);
   if (!file) return false;
+
+  uint32_t originalSize = file.size();
   size_t written = file.println(line);
+  file.flush();
   file.close();
-  return written > 0;
+  if (written != line.length() + 2) return false;
+
+  File verify = SD.open(path.c_str(), FILE_READ);
+  if (!verify || verify.size() != originalSize + written ||
+      !verify.seek(originalSize)) {
+    if (verify) verify.close();
+    return false;
+  }
+
+  String savedLine = verify.readStringUntil('\n');
+  verify.close();
+  if (savedLine.endsWith("\r")) savedLine.remove(savedLine.length() - 1);
+  return savedLine == line;
+}
+
+void queuePendingMonthlyMirror(const String &dateText,
+                               const String &fileName,
+                               const String &line) {
+  for (uint8_t i = 0; i < pendingMonthlyMirrorCount; i++) {
+    if (pendingMonthlyMirrors[i].dateText == dateText &&
+        pendingMonthlyMirrors[i].fileName == fileName &&
+        pendingMonthlyMirrors[i].line == line) {
+      return;
+    }
+  }
+
+  if (pendingMonthlyMirrorCount >= MAX_PENDING_MONTHLY_MIRRORS) {
+    debugFail("queuePendingMonthlyMirror", "Retry queue is full; the verified daily archive remains authoritative and startup reconciliation can retry the mirror.");
+    return;
+  }
+
+  PendingMonthlyMirror &pending = pendingMonthlyMirrors[pendingMonthlyMirrorCount++];
+  pending.dateText = dateText;
+  pending.fileName = fileName;
+  pending.line = line;
+}
+
+void queueMissingMonthlyMirrorsForDate(const String &dateText) {
+  const char *archiveNames[] = {
+    "accounts.csv", "keys.csv", "transactions.csv", "returns.csv"
+  };
+
+  for (uint8_t i = 0; i < 4; i++) {
+    String dailyPath = "/daily/" + dateText + "/" + archiveNames[i];
+    File dailyFile = SD.open(dailyPath.c_str(), FILE_READ);
+    if (!dailyFile) continue;
+
+    String monthlyPath = "/monthly/" + dateText.substring(0, 7) + "/" + archiveNames[i];
+    while (dailyFile.available()) {
+      String line = dailyFile.readStringUntil('\n');
+      line.trim();
+      if (line.length() == 0 || archiveContainsLine(monthlyPath, line)) continue;
+      queuePendingMonthlyMirror(dateText, archiveNames[i], line);
+    }
+    dailyFile.close();
+  }
+}
+
+bool retryPendingMonthlyMirrors() {
+  if (pendingMonthlyMirrorCount == 0 ||
+      millis() - lastMonthlyMirrorRetry < 30000UL) {
+    return true;
+  }
+  lastMonthlyMirrorRetry = millis();
+
+  if (!SD.begin(SD_STORAGE_CS, SPI)) {
+    storageSDReady = false;
+    debugFail("retryPendingMonthlyMirrors", "SD card unavailable; monthly mirror retry remains pending.");
+    return false;
+  }
+
+  uint8_t index = 0;
+  while (index < pendingMonthlyMirrorCount) {
+    PendingMonthlyMirror &pending = pendingMonthlyMirrors[index];
+    String monthlyDirectory = "/monthly/" + pending.dateText.substring(0, 7);
+    String monthlyPath = monthlyDirectory + "/" + pending.fileName;
+    bool mirrored = ensureArchiveDirectory("/monthly") &&
+                    ensureArchiveDirectory(monthlyDirectory);
+
+    if (mirrored && !archiveContainsLine(monthlyPath, pending.line)) {
+      mirrored = appendMountedArchiveLine(monthlyPath, pending.line);
+    }
+
+    if (!mirrored) {
+      debugValue("retryPendingMonthlyMirrors", "Still pending", monthlyPath);
+      index++;
+      continue;
+    }
+
+    for (uint8_t moveIndex = index + 1;
+         moveIndex < pendingMonthlyMirrorCount;
+         moveIndex++) {
+      pendingMonthlyMirrors[moveIndex - 1] = pendingMonthlyMirrors[moveIndex];
+    }
+    pendingMonthlyMirrorCount--;
+  }
+
+  SD.end();
+  digitalWrite(SD_STORAGE_CS, HIGH);
+  storageSDReady = true;
+  return pendingMonthlyMirrorCount == 0;
 }
 
 bool migrateLegacyRootLogs() {
@@ -232,6 +335,7 @@ bool loadLogsFromSD() {
 
   for (uint8_t i = 0; i < loadedDateCount; i++) {
     addDateLogIfMissing(dates[i]);
+    queueMissingMonthlyMirrorsForDate(dates[i]);
     String transactionPath = "/daily/" + dates[i] + "/transactions.csv";
     File transactionFile = SD.open(transactionPath.c_str(), FILE_READ);
     if (!transactionFile) continue;
@@ -634,43 +738,38 @@ bool appendLineToDaySD(String path, String line) {
 
   String dailyDirectory = "/daily/" + dateText;
   String monthlyDirectory = "/monthly/" + dateText.substring(0, 7);
-  bool directoriesReady = ensureArchiveDirectory("/daily") &&
-                          ensureArchiveDirectory("/monthly") &&
-                          ensureArchiveDirectory(dailyDirectory) &&
-                          ensureArchiveDirectory(monthlyDirectory);
-  if (!directoriesReady) {
+  if (!ensureArchiveDirectory("/daily") ||
+      !ensureArchiveDirectory(dailyDirectory)) {
     SD.end();
-    debugFail("appendLineToDaySD", "Could not create archive directory.");
+    debugFail("appendLineToDaySD", "Could not create daily archive directory.");
     return false;
   }
 
   String dailyPath = dailyDirectory + "/" + fileName;
-  String monthlyPath = monthlyDirectory + "/" + fileName;
-  File dailyFile = SD.open(dailyPath.c_str(), FILE_APPEND);
-  if (!dailyFile) {
+  if (!appendMountedArchiveLine(dailyPath, line)) {
     SD.end();
-    debugFail("appendLineToDaySD", "Could not open daily archive file.");
-    return false;
-  }
-  size_t dailyWritten = dailyFile.println(line);
-  dailyFile.close();
-
-  File monthlyFile = SD.open(monthlyPath.c_str(), FILE_APPEND);
-  if (!monthlyFile) {
-    SD.end();
-    debugFail("appendLineToDaySD", "Daily row saved, but monthly archive file could not be opened.");
-    return false;
-  }
-  size_t monthlyWritten = monthlyFile.println(line);
-  monthlyFile.close();
-  SD.end();
-
-  if (dailyWritten == 0 || monthlyWritten == 0) {
-    debugFail("appendLineToDaySD", "Daily or monthly archive write failed.");
+    digitalWrite(SD_STORAGE_CS, HIGH);
+    storageSDReady = false;
+    debugFail("appendLineToDaySD", "Daily archive row could not be written and verified.");
     return false;
   }
 
   storageSDReady = true;
+  String monthlyPath = monthlyDirectory + "/" + fileName;
+  bool monthlyReady = ensureArchiveDirectory("/monthly") &&
+                      ensureArchiveDirectory(monthlyDirectory);
+  if (monthlyReady && !archiveContainsLine(monthlyPath, line)) {
+    monthlyReady = appendMountedArchiveLine(monthlyPath, line);
+  }
+
+  if (!monthlyReady) {
+    queuePendingMonthlyMirror(dateText, fileName, line);
+    debugFail("appendLineToDaySD", "Daily row was verified; monthly mirror failed and was queued for retry.");
+  }
+
+  SD.end();
+  digitalWrite(SD_STORAGE_CS, HIGH);
+
   debugOK("appendLineToDaySD");
 
   return true;

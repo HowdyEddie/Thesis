@@ -80,8 +80,8 @@
 #define RFID_RST   4
 
 #define SD_STORAGE_CS  14
-#define USB_CS       25   // CH376S SPI chip select
-#define USB_INT      35   // CH376S active-low interrupt; GPIO35 needs external pull-up
+#define USB_CS       13   // CH376S SPI chip select
+#define USB_INT      25   // CH376S active-low interrupt; GPIO25 needs external pull-up
 
 // One limit switch safety input.
 // GPIO34 is input-only and available in this project.
@@ -310,6 +310,7 @@
 #define VP_DOWNLOAD_ICON       0x34E0
 
 #define DATE_CARD_BYTES        16
+#define MAX_PENDING_MONTHLY_MIRRORS 120
 
 // Account page
 #define VP_ACCOUNT_CARD_BASE        0x3600
@@ -446,6 +447,12 @@ struct TransactionLogEntry {
   String dateText;
 };
 
+struct PendingMonthlyMirror {
+  String dateText;
+  String fileName;
+  String line;
+};
+
 struct AccountEntry {
   String userNumber;
   String userName;
@@ -528,6 +535,10 @@ unsigned long lastCurrentLogDateSyncCheck = 0;
 TransactionLogEntry transactionLogs[MAX_TRANSACTION_LOGS];
 uint8_t transactionLogCount = 0;
 uint8_t transactionLogOffset = 0;
+
+PendingMonthlyMirror pendingMonthlyMirrors[MAX_PENDING_MONTHLY_MIRRORS];
+uint8_t pendingMonthlyMirrorCount = 0;
+unsigned long lastMonthlyMirrorRetry = 0;
 
 String dateLogs[MAX_DATE_LOGS];
 uint8_t dateLogCount = 0;
@@ -670,11 +681,14 @@ bool handleTransactionLogControls(uint16_t vp, uint16_t value);
 void initDateLogs();
 bool loadLogsFromSD();
 bool ensureArchiveDirectory(const String &path);
+bool retryPendingMonthlyMirrors();
+void queuePendingMonthlyMirror(const String &dateText, const String &fileName, const String &line);
+void queueMissingMonthlyMirrorsForDate(const String &dateText);
 void renderDateCards();
 String csvEscapeField(const String &field);
 bool parseCSVFields(String line, String *fields, uint8_t fieldCount);
 bool handleDateCards(uint16_t vp, uint16_t value);
-void addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText);
+bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText);
 void addDateLogIfMissing(String dateText);
 
 // Keyboard
@@ -788,7 +802,7 @@ bool initRFIDModule();
 String readRFIDTagOnce();
 String waitForRFIDTag(uint32_t timeoutMs);
 void checkLockedScreenRFIDReturn();
-void markRegisteredKeyReturned(uint8_t keyIndex);
+bool markRegisteredKeyReturned(uint8_t keyIndex);
 void updateReturnUnlockRelock();
 void startTimedSlotUnlock(uint8_t slotIndex);
 
@@ -885,6 +899,7 @@ void loop() {
 
   updateRTCDisplay();
   syncCurrentLogsWithRTCDate();
+  retryPendingMonthlyMirrors();
   monitorUSBInsertion();
   handleDisplayIdleSleep();
 

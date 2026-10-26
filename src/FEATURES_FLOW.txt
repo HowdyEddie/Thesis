@@ -86,22 +86,33 @@ User access and borrowing
    scanner does not block the page; the borrower name can still be entered
    manually with the on-screen keyboard. Scanned codes can optionally resolve
    through /students.csv.
-4. Confirming a borrower marks the slot as taken in ESP32 Preferences, adds
-   current-session and transaction log entries, appends daily and monthly SD
-   records, and energizes that slot output.
+   Pressing OK with no borrower name cancels the pending borrow, clears the
+   slot selection, and returns to the dashboard.
+4. Confirming a borrower first appends and verifies the transaction in the
+   daily SD archive. If that commit fails, the borrow is cancelled and the
+   slot state/output remain unchanged. After a successful daily commit, RAM
+   logs/state and the slot output are updated. A failed monthly mirror is
+   queued for periodic retry and rechecked against daily archives at startup.
 5. The slot output automatically returns to the locked level after
    RETURN_UNLOCK_MS. The slot remains marked occupied until its registered
    RFID key is scanned on Page 1, 2, or 3.
 
 RFID return flow
 ----------------
-1. RFID is polled on the Locked Screen and Home Dashboard pages.
+1. RFID returns are polled only on Home Dashboard Pages 2 and 3, not on the
+   Locked Screen.
 2. The scanned UID must match a registered key whose slot is currently marked
    taken. Unknown keys and keys for unoccupied slots do not change the locker.
-3. The matching slot is marked available in Preferences, its output is
-   activated for RETURN_UNLOCK_MS, and the output is then relocked.
-4. Current logs, the transaction history, and SD audit files receive a return
-   record. Repeat scans of the same UID are rate-limited.
+3. The return transaction must first be appended and verified in the daily SD
+   archive. If that commit fails, the return is cancelled and the slot remains
+   borrowed/locked. After a successful daily commit, the slot is marked
+   available in Preferences, its output is activated for RETURN_UNLOCK_MS,
+   and the output is then relocked.
+4. Current logs and transaction history receive the committed return record.
+   Monthly archive mirrors are retried if needed. The auxiliary returns.csv
+   row is also written; its failure is reported without undoing a return whose
+   authoritative transaction row was already committed. Repeat scans of the
+   same UID are rate-limited after a successful return.
 
 Admin flow and pages
 --------------------
@@ -143,6 +154,10 @@ Admin Dashboard. Current-log cards are rebuilt from the RTC day's transaction
 archive during startup and when the RTC date changes. They therefore survive
 a power cycle as long as SD writes succeeded and the same card is available.
 The current-log display retains the newest 40 events for the active date.
+The daily transactions.csv file is authoritative for borrow/return commits:
+the firmware verifies the daily row before changing slot state or activating
+an output. Monthly files are mirrors; failed mirror writes are queued for
+periodic retry and missing rows are discovered from daily archives on startup.
 Current-log cards and Admin Dashboard transaction rows are presented
 newest-first; the CSV archive itself remains append-only and chronological.
 The first visible card/row is the latest event, so recent activity is visible

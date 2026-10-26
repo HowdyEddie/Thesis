@@ -1,7 +1,7 @@
 SMARTLOCKER STORAGE - PROJECT PROGRESS
 =====================================
 
-UPDATED: 2026-10-24 (13:26)
+UPDATED: 2026-10-26 (20:29)
 PURPOSE: Compact handoff/progress record aligned with the project conversation.
 PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
 
@@ -102,6 +102,14 @@ CURRENT PROJECT STATE
        Build passed on 2026-10-24: RAM 47,176 bytes; flash 472,697 bytes.
 [DONE] Physical prototype test confirmed the slot locks now behave as
        intended: MCP outputs initialize LOW/inactive and lock operation works.
+[DONE] Borrow and RFID-return transactions now require a verified daily
+       transactions.csv append before slot state or lock outputs change. The
+       monthly archive is treated as a mirror: failed writes are queued for
+       periodic retry, with daily archives reconciled on startup.
+[DONE] RFID returns are documented as Home Dashboard-only (Pages 2/3), not
+       available on the Locked Screen, matching the requested behavior.
+       PlatformIO build passed on 2026-10-26: RAM 52,944 bytes; flash
+       475,729 bytes.
 [LIMITATION] MCP outputs cannot be driven by firmware until power is stable
              and I2C communication starts. Add suitable external pull-downs
              at lock-driver inputs if they must remain LOW during that power-up
@@ -139,6 +147,11 @@ UPCOMING WORK - PRIORITY ORDER
    - Record which modules are available when testing partial-hardware startup;
      module readiness is reported to Serial, but slot operations are not gated
      on SD, RTC, or RFID readiness.
+   - Remove SD/write access during a borrow and RFID return; verify both
+     operations remain cancelled and no slot state/output changes unless the
+     daily transaction row can be written and verified.
+   - Test monthly archive write failure, then restore SD access and verify
+     pending mirrors retry during runtime and are reconciled after reboot.
    - Confirm GPIO14 SD initialization, writing, and card-removal behavior.
    - Test daily/monthly CSV creation, quoted CSV fields, reboot history reload,
      and legacy root-file migration on a backed-up test card.
