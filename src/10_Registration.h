@@ -90,8 +90,8 @@ void startUserFingerprintRegistration() {
     return;
   }
 
-  debugValue("startUserFingerprintRegistration", "User name", pendingRegisterUserName);
-  debugNumber("startUserFingerprintRegistration", "Fingerprint ID selected", pendingFingerprintID);
+  debugNumber("startUserFingerprintRegistration", "User name length", pendingRegisterUserName.length());
+  debugLog("startUserFingerprintRegistration", "Fingerprint template slot selected.");
 
   writeVPText(VP_REGISTER_STATUS_TEXT, "Registering FPS", 32);
   writeVPWord(VP_REGISTER_STATUS_ICON, REG_REGISTERING);
@@ -118,8 +118,8 @@ void startUserFingerprintRegistration() {
   writeVPText(VP_REGISTER_STATUS_TEXT, "Register success", 32);
   writeVPWord(VP_REGISTER_STATUS_ICON, REG_SUCCESS);
 
-  debugValue("startUserFingerprintRegistration", "Registration complete for user", pendingRegisterUserName);
-  debugNumber("startUserFingerprintRegistration", "Saved FPS ID", pendingFingerprintID);
+  debugLog("startUserFingerprintRegistration", "Registration completed.");
+  debugLog("startUserFingerprintRegistration", "Fingerprint template linked to account.");
 
   pendingRegisterUserName = "";
   pendingFingerprintID = 0;

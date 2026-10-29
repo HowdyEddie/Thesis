@@ -157,7 +157,7 @@ bool addRegisteredAccount(String userName, uint16_t fingerprintID, String dateRe
                    csvEscapeField(userName) + "," + String(fingerprintID) + "," + dateRegistered;
   appendLineToDaySD("/accounts.csv", csvLine);
 
-  debugNumber("addRegisteredAccount", "Registered account saved with FPS ID", fingerprintID);
+  debugLog("addRegisteredAccount", "Registered account saved with fingerprint template.");
 
   return true;
 }
@@ -215,7 +215,7 @@ void setCurrentHomeUserFromFingerprint(uint16_t fingerprintID) {
     currentHomeUserName = "Unknown";
   }
 
-  debugValue("setCurrentHomeUserFromFingerprint", "Current home user", currentHomeUserName);
+  debugLog("setCurrentHomeUserFromFingerprint", "Authenticated fingerprint user.");
 }
 
 /*
@@ -374,11 +374,27 @@ void deleteVisibleAccount(uint8_t visibleIndex) {
 
   uint16_t fid = accounts[index].fingerprintID;
 
-  if (fpsReady && fid > 0) {
-    uint8_t p = finger.deleteModel(fid);
+  if (fid == 0) {
+    debugFail("deleteVisibleAccount", "Account has no valid fingerprint ID; account was not deleted.");
+    return;
+  }
 
-    debugNumber("deleteVisibleAccount", "Deleting fingerprint ID", fid);
-    debugNumber("deleteVisibleAccount", "finger.deleteModel result", p);
+  if (!fpsReady && !initFingerprintModule()) {
+    debugFail("deleteVisibleAccount", "Fingerprint sensor is unavailable; account was not deleted.");
+    return;
+  }
+
+  debugLog("deleteVisibleAccount", "Deleting linked fingerprint template.");
+  uint8_t result = finger.deleteModel(fid);
+  debugNumber("deleteVisibleAccount", "finger.deleteModel result", result);
+
+  if (result != FINGERPRINT_OK) {
+    debugFail("deleteVisibleAccount", "Fingerprint template deletion failed; account was not deleted.");
+    return;
+  }
+
+  if (currentHomeFingerprintID == fid) {
+    clearCurrentHomeUser();
   }
 
   accounts[index].used = false;

@@ -1,22 +1,27 @@
-This document list all the current bugs found when testing the prototype which is not resolve yet:
-This document should be updated only by "ME". [Unresolved = '-' : resolve = '+']
+SMARTLOCKER STORAGE - SOFTWARE ISSUE STATUS
+==========================================
+Legend: '-' unresolved; '+' fixed in firmware and/or documented.
 
-*Software
-    - Unlock timers can stay active longer than the intended 5 seconds.
-    - Transactions can succeed even when logging to the SD card fails.
-    - Sensitive information is visible in Serial debug messages.
-    - CSV files may not load correctly if a field contains a line break.
-    - CSV data format saved from the USB Drive is (DATE, Borrower NAME, KEY NAME, ACTION, TIME, TUP CODE, USER Registered).
+Software
+--------
++ Slot unlock timers are serviced before/after main-loop work and during
+  known long waits, CSV reads, and USB-copy loops. Delays from individual
+  hardware/library calls still require physical timing verification.
++ Borrow and return state changes require a verified daily transaction write.
++ Serial diagnostics redact PIN input, typed text, borrower names, QR contents
+  and codes, RFID UIDs, and fingerprint template IDs.
++ CSV readers assemble complete quoted records, including embedded line
+  breaks.
++ New QR borrow records persist the scanned TUP code in the SD transaction
+  row, and USB transaction export writes DATE, Borrower NAME, KEY NAME,
+  ACTION, TIME, TUP CODE, and USER Registered columns. Borrow and return
+  events are exported as separate action rows. Legacy/manual/return rows
+  without a code export an empty TUP CODE field. The transaction header is
+  read back from USB before export success is reported.
 
-*DWIN DISPLAY
-    "This bugs has something to do with the UI built which can only be fixed through the DGUS Software"
-
-    - Register Section: The "Add New User" cannot be pressed back.
-    - Downloading Logs: Still not tried working/showing to the screen.
-    - Admin Dashboard (Transaction Log): Only 6 rows shows something but the max rows should be 12.
-    + Borrowing Feature: When someone attempts to press the "OK" button in QR process it goes back to dashboard, but the selection slots cannot pressed or wont work anymore.
-    - Text Display: This is where the text of each text showing it not readable.
- 
-
-Notes:
-    - The "Names" display on the LCD should be minimize, in-order to be readable. The maximum character text is only 15.
+Prototype verification
+----------------------
+Code fixes above require physical testing on the locker hardware. In
+particular, measure relock timing during SD/USB activity and verify that
+quoted multiline fields survive write, reload, and archive migration. Verify
+TUP-code storage and transaction export on a USB drive.

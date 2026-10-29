@@ -64,7 +64,7 @@ String readRFIDTagOnce() {
   rfid.PCD_StopCrypto1();
 
   registerUserActivity("RFID");
-  debugValue("readRFIDTagOnce", "RFID UID", uid);
+  debugLog("readRFIDTagOnce", "RFID tag read.");
 
   return uid;
 }
@@ -88,7 +88,7 @@ String waitForRFIDTag(uint32_t timeoutMs) {
       return normalizeRFIDUID(uid);
     }
 
-    delay(100);
+    delayWithUnlockService(100);
   }
 
   return "";
@@ -122,13 +122,13 @@ void checkLockedScreenRFIDReturn() {
   int keyIndex = findRegisteredKeyIndexByRFID(uid);
 
   if (keyIndex < 0) {
-    debugValue("checkLockedScreenRFIDReturn", "Unregistered RFID UID", uid);
+    debugLog("checkLockedScreenRFIDReturn", "Unregistered RFID tag ignored.");
     return;
   }
 
   uint8_t slotNumber = registeredKeys[keyIndex].slotNumber;
   if (slotNumber < 1 || slotNumber > SLOT_COUNT || !slotTaken[slotNumber - 1]) {
-    debugValue("checkLockedScreenRFIDReturn", "Registered RFID is not currently borrowed", uid);
+    debugLog("checkLockedScreenRFIDReturn", "Registered RFID key is not currently borrowed.");
     return;
   }
 
@@ -198,7 +198,6 @@ bool markRegisteredKeyReturned(uint8_t keyIndex) {
   }
 
   debugNumber("markRegisteredKeyReturned", "Returned slot", slotNumber);
-  debugValue("markRegisteredKeyReturned", "Returned key", registeredKeys[keyIndex].keyName);
   return true;
 }
 
@@ -225,4 +224,12 @@ void startTimedSlotUnlock(uint8_t slotIndex) {
   if (slotIndex >= SLOT_COUNT) return;
   slotUnlockActive[slotIndex] = true;
   slotUnlockStartTime[slotIndex] = millis();
+}
+
+void delayWithUnlockService(uint32_t durationMs) {
+  unsigned long startTime = millis();
+  while (millis() - startTime < durationMs) {
+    updateReturnUnlockRelock();
+    delay(1);
+  }
 }

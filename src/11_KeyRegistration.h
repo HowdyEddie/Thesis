@@ -302,7 +302,7 @@ void saveNewKeyRegistration() {
   writeVPText(VP_KEYREG_STATUS_TEXT, "Key saved", 32);
   writeVPWord(VP_KEYREG_STATUS_ICON, ICON_KEY_SAVED);
 
-  debugValue("saveNewKeyRegistration", "Saved key line", line);
+  debugNumber("saveNewKeyRegistration", "Registered slot", slotNumber);
 
   renderHomeSlotKeyNames();
 }

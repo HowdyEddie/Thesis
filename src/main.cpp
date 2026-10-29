@@ -62,6 +62,7 @@
 #define QR_RX      32
 #define QR_TX      33
 #define QR_BAUD    9600
+#define QR_INTERBYTE_TIMEOUT_MS 500UL
 
 // I2C bus for 3pcs CJMCU-2317 / MCP23017
 #define I2C_SDA    21
@@ -81,7 +82,7 @@
 
 #define SD_STORAGE_CS  14
 #define USB_CS       13   // CH376S SPI chip select
-#define USB_INT      25   // CH376S active-low interrupt; GPIO25 needs external pull-up
+#define USB_INT      25   // CH376S active-low interrupt; internal pull-up enabled by the library
 
 // One limit switch safety input.
 // GPIO34 is input-only and available in this project.
@@ -134,8 +135,8 @@
 //   Year, Month, Day, Hour, Minute, Second
 #define SET_RTC_FIXED_ONCE       0
 #define RTC_FIXED_YEAR           2026
-#define RTC_FIXED_MONTH          7
-#define RTC_FIXED_DAY            16
+#define RTC_FIXED_MONTH          10
+#define RTC_FIXED_DAY            27
 #define RTC_FIXED_HOUR           14
 #define RTC_FIXED_MINUTE         30
 #define RTC_FIXED_SECOND         0
@@ -218,12 +219,13 @@
 #define VP_ADMIN_ACCOUNT       0x1045
 #define VP_ADMIN_MAINTENANCE   0x1046
 #define VP_ADMIN_DOWNLOAD      0x1047
+#define VP_ADMIN_SHOW_PASSWORD      0x3A03
 
 #define VP_ADMIN_LOGIN_STATUS_TEXT  0x1660
 #define VP_ADMIN_LOGIN_STATUS_ICON  0x1680
 
 #define ADMIN_PASS_VALUE       0x3030  // Legacy/default numeric value. New password feature uses ADMIN_DEFAULT_PIN_TEXT.
-#define ADMIN_DEFAULT_PIN_TEXT  "3030"
+#define ADMIN_DEFAULT_PIN_TEXT  "0000"  // Default PIN text for new installations. Can be changed in Preferences.
 #define ADMIN_PIN_DIGITS        4
 #define ADMIN_BUTTON_VALUE     0x0001
 
@@ -415,6 +417,7 @@
 #define DOWNLOAD_SUCCESS            0x0004
 #define DOWNLOAD_USB_NOT_FOUND      0x0005
 #define DOWNLOAD_FAILED             0x0006
+#define DOWNLOAD_STATUS_DISPLAY_MS  5000UL
 
 // Registration icon values
 #define REG_IDLE                    0x0000
@@ -514,6 +517,9 @@ uint16_t currentPageSaved = PAGE_LOADING; // I added
 uint16_t adminInputValue = 0;
 bool adminInputReceived = false;
 String adminInputText = "";
+bool adminPasswordVisible = false;
+uint8_t dwinReceivedWordCount = 0;
+uint16_t dwinReceivedSecondWord = 0;
 String savedAdminPIN = ADMIN_DEFAULT_PIN_TEXT;
 
 String pendingOldAdminPIN = "";
@@ -589,6 +595,8 @@ bool usbReady = false;
 bool usbInserted = false;
 bool previousUSBInserted = false;
 unsigned long lastUSBMonitorCheck = 0;
+unsigned long downloadStatusClearAt = 0;
+bool downloadStatusClearPending = false;
 
 unsigned long lastRTCUpdate = 0;
 unsigned long lastFingerprintCheck = 0;
@@ -650,6 +658,7 @@ void goToQRBorrowerPage();
 void renderQRBorrowerPage();
 void goToAdminLoginPage();
 void renderAdminLoginPage();
+void renderAdminPINInput();
 void goToAdminDashboard();
 void goToAccountPage();
 void goToRegistrationPage();
@@ -662,6 +671,7 @@ bool isAdminSourcePage(uint16_t pageID);
 
 // Current logs
 void initCurrentLogs();
+String getCurrentLogFirstName(String borrowerName);
 void renderCurrentLogs(uint8_t visibleCards);
 void clearCurrentLogCard(uint8_t cardIndex);
 void scrollCurrentLogsUp();
@@ -687,8 +697,13 @@ void queueMissingMonthlyMirrorsForDate(const String &dateText);
 void renderDateCards();
 String csvEscapeField(const String &field);
 bool parseCSVFields(String line, String *fields, uint8_t fieldCount);
+String readCSVRecord(File &file);
 bool handleDateCards(uint16_t vp, uint16_t value);
-bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText);
+bool addTransactionLog(String keyNo, String borrowerName, String keyName,
+                       String borrowedTime, String returnedTime,
+                       String userName, String dateText,
+                       String studentCode = "");
+bool parseTransactionCSVFields(String line, String *fields);
 void addDateLogIfMissing(String dateText);
 
 // Keyboard
@@ -784,6 +799,8 @@ bool initStorageModules();
 bool initUSBHost();
 bool usbHostConnected();
 void monitorUSBInsertion();
+void showDownloadStatus(uint16_t status);
+void updateDownloadStatus();
 void notifyUSBInserted();
 void notifyUSBRemoved();
 
@@ -805,6 +822,7 @@ void checkLockedScreenRFIDReturn();
 bool markRegisteredKeyReturned(uint8_t keyIndex);
 void updateReturnUnlockRelock();
 void startTimedSlotUnlock(uint8_t slotIndex);
+void delayWithUnlockService(uint32_t durationMs);
 
 // QR / Borrower Identification
 bool initQRScanner();
@@ -891,6 +909,9 @@ void loop() {
   uint16_t vp;
   uint16_t value;
 
+  updateReturnUnlockRelock();
+  handleQRScanner();
+
   if (dwinRead(vp, value)) {
     handleDWIN(vp, value);
   }
@@ -898,9 +919,13 @@ void loop() {
   handleLimitSwitchSafetyLock();
 
   updateRTCDisplay();
+  updateReturnUnlockRelock();
   syncCurrentLogsWithRTCDate();
+  updateReturnUnlockRelock();
   retryPendingMonthlyMirrors();
+  updateReturnUnlockRelock();
   monitorUSBInsertion();
+  updateDownloadStatus();
   handleDisplayIdleSleep();
 
   if (currentPage == PAGE_LOCKED_SCREEN ||
@@ -916,7 +941,5 @@ void loop() {
 
   updateReturnUnlockRelock();
 
-  if (currentPage == PAGE_QR_BORROWER && qrScanActive) {
-    handleQRScanner();
-  }
+  handleQRScanner();
 }

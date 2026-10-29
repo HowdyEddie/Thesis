@@ -62,6 +62,38 @@ bool parseCSVFields(String line, String *fields, uint8_t fieldCount) {
   return !insideQuotes && fieldIndex == fieldCount - 1;
 }
 
+String readCSVRecord(File &file) {
+  String record;
+  bool insideQuotes = false;
+
+  while (file.available()) {
+    updateReturnUnlockRelock();
+    char c = (char)file.read();
+
+    if (c == '"') {
+      record += c;
+      if (insideQuotes && file.peek() == '"') {
+        record += (char)file.read();
+      } else {
+        insideQuotes = !insideQuotes;
+      }
+    } else if (c == '\n' && !insideQuotes) {
+      break;
+    } else if (c != '\r' || insideQuotes) {
+      record += c;
+    }
+  }
+
+  return record;
+}
+
+bool parseTransactionCSVFields(String line, String *fields) {
+  if (parseCSVFields(line, fields, 8)) return true;
+  if (!parseCSVFields(line, fields, 7)) return false;
+  fields[7] = "";
+  return true;
+}
+
 String archiveEntryName(File &entry) {
   String name = entry.name();
   name.trim();
@@ -111,8 +143,7 @@ bool archiveContainsLine(const String &path, const String &line) {
   if (!file) return false;
   bool found = false;
   while (file.available()) {
-    String existing = file.readStringUntil('\n');
-    existing.trim();
+    String existing = readCSVRecord(file);
     if (existing == line) {
       found = true;
       break;
@@ -139,7 +170,7 @@ bool appendMountedArchiveLine(const String &path, const String &line) {
     return false;
   }
 
-  String savedLine = verify.readStringUntil('\n');
+  String savedLine = readCSVRecord(verify);
   verify.close();
   if (savedLine.endsWith("\r")) savedLine.remove(savedLine.length() - 1);
   return savedLine == line;
@@ -179,8 +210,7 @@ void queueMissingMonthlyMirrorsForDate(const String &dateText) {
 
     String monthlyPath = "/monthly/" + dateText.substring(0, 7) + "/" + archiveNames[i];
     while (dailyFile.available()) {
-      String line = dailyFile.readStringUntil('\n');
-      line.trim();
+      String line = readCSVRecord(dailyFile);
       if (line.length() == 0 || archiveContainsLine(monthlyPath, line)) continue;
       queuePendingMonthlyMirror(dateText, archiveNames[i], line);
     }
@@ -251,13 +281,12 @@ bool migrateLegacyRootLogs() {
 
     String fileName = sourcePath.substring(sourcePath.lastIndexOf('/') + 1);
     while (source.available()) {
-      String line = source.readStringUntil('\n');
-      line.trim();
+      String line = readCSVRecord(source);
       if (line.length() == 0) continue;
 
       String dateText = line.substring(0, 10);
       if (!isValidArchiveDate(dateText)) {
-        debugValue("migrateLegacyRootLogs", "Skipped row with invalid date", line);
+        debugFail("migrateLegacyRootLogs", "Skipped CSV row with invalid date.");
         migrationSucceeded = false;
         continue;
       }
@@ -341,15 +370,14 @@ bool loadLogsFromSD() {
     if (!transactionFile) continue;
 
     while (transactionFile.available()) {
-      String line = transactionFile.readStringUntil('\n');
-      line.trim();
+      String line = readCSVRecord(transactionFile);
       if (line.length() == 0) continue;
 
-      String fields[7];
-      if (parseCSVFields(line, fields, 7) && fields[0] == dates[i]) {
+      String fields[8];
+      if (parseTransactionCSVFields(line, fields) && fields[0] == dates[i]) {
         addLoadedTransaction(fields);
       } else {
-        debugValue("loadLogsFromSD", "Skipped malformed transaction row", line);
+        debugFail("loadLogsFromSD", "Skipped malformed transaction row.");
       }
     }
     transactionFile.close();
@@ -487,7 +515,7 @@ bool initUSBHost() {
   if (!usbReady) {
     usbInserted = false;
     previousUSBInserted = false;
-    debugFail("initUSBHost", "CH376S did not respond over SPI; check CS GPIO25, INT GPIO35, shared SPI, power, and SPI mode.");
+    debugFail("initUSBHost", "CH376S did not respond over SPI; check CS GPIO13, INT GPIO25, shared SPI, power, and SPI mode.");
     return false;
   }
 
@@ -510,6 +538,28 @@ bool initUSBHost() {
 */
 bool usbHostConnected() {
   return usbReady && flashDrive.getDeviceStatus();
+}
+
+void showDownloadStatus(uint16_t status) {
+  writeVPWord(VP_DOWNLOAD_ICON, status);
+
+  if (status == DOWNLOAD_USB_CONNECTED || status == DOWNLOAD_SUCCESS ||
+      status == DOWNLOAD_USB_NOT_FOUND || status == DOWNLOAD_FAILED) {
+    downloadStatusClearAt = millis() + DOWNLOAD_STATUS_DISPLAY_MS;
+    downloadStatusClearPending = true;
+  } else {
+    downloadStatusClearPending = false;
+  }
+}
+
+void updateDownloadStatus() {
+  if (!downloadStatusClearPending ||
+      static_cast<int32_t>(millis() - downloadStatusClearAt) < 0) {
+    return;
+  }
+
+  downloadStatusClearPending = false;
+  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_IDLE);
 }
 
 /*
@@ -540,6 +590,105 @@ void monitorUSBInsertion() {
 
     previousUSBInserted = usbInserted;
   }
+}
+
+bool writeUSBBytes(const uint8_t *data, size_t length,
+                   uint32_t &bytesWritten) {
+  uint8_t buffer[64];
+  size_t offset = 0;
+
+  while (offset < length) {
+    updateReturnUnlockRelock();
+    size_t chunkSize = length - offset;
+    if (chunkSize > sizeof(buffer)) chunkSize = sizeof(buffer);
+    memcpy(buffer, data + offset, chunkSize);
+    if (!flashDrive.writeFile(reinterpret_cast<char *>(buffer),
+                              static_cast<uint8_t>(chunkSize))) {
+      return false;
+    }
+    offset += chunkSize;
+    bytesWritten += static_cast<uint32_t>(chunkSize);
+  }
+
+  return true;
+}
+
+bool writeUSBTransactionCSV(File &source, uint32_t &bytesWritten) {
+  const String header =
+      "DATE,Borrower NAME,KEY NAME,ACTION,TIME,TUP CODE,USER Registered\r\n";
+  if (!writeUSBBytes(reinterpret_cast<const uint8_t *>(header.c_str()),
+                     header.length(), bytesWritten)) {
+    return false;
+  }
+
+  while (source.available()) {
+    String line = readCSVRecord(source);
+    if (line.length() == 0) continue;
+
+    String fields[8];
+    if (!parseTransactionCSVFields(line, fields) ||
+        !isValidArchiveDate(fields[0])) {
+      debugFail("writeUSBTransactionCSV", "Malformed transaction row; export stopped.");
+      return false;
+    }
+
+    bool hasBorrowTime = fields[4].length() > 0 && fields[4] != "--:--";
+    bool hasReturnTime = fields[5].length() > 0 && fields[5] != "--:--";
+    if (!hasBorrowTime && !hasReturnTime) {
+      debugFail("writeUSBTransactionCSV", "Transaction row has no borrow or return time; export stopped.");
+      return false;
+    }
+
+    for (uint8_t actionIndex = 0; actionIndex < 2; actionIndex++) {
+      bool isBorrow = actionIndex == 0;
+      if ((isBorrow && !hasBorrowTime) || (!isBorrow && !hasReturnTime)) continue;
+
+      String action = isBorrow ? "Borrow" : "Return";
+      String time = isBorrow ? fields[4] : fields[5];
+      String record = csvEscapeField(fields[0]) + "," +
+                      csvEscapeField(fields[2]) + "," +
+                      csvEscapeField(fields[3]) + "," +
+                      csvEscapeField(action) + "," +
+                      csvEscapeField(time) + "," +
+                      csvEscapeField(fields[7]) + "," +
+                      csvEscapeField(fields[6]) + "\r\n";
+      if (!writeUSBBytes(reinterpret_cast<const uint8_t *>(record.c_str()),
+                         record.length(), bytesWritten)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool verifyUSBTransactionCSVHeader(const char *fileName) {
+  const char *expectedHeader =
+      "DATE,Borrower NAME,KEY NAME,ACTION,TIME,TUP CODE,USER Registered\r\n";
+  const size_t expectedHeaderLength = strlen(expectedHeader);
+
+  flashDrive.setFileName(fileName);
+  if (flashDrive.openFile() != ANSW_USB_INT_SUCCESS) {
+    debugValue("verifyUSBTransactionCSVHeader", "Could not reopen transaction export", fileName);
+    return false;
+  }
+
+  char headerBuffer[96] = {};
+  flashDrive.readFile(headerBuffer, sizeof(headerBuffer));
+  bool headerMatches =
+      flashDrive.getStreamLen() >= expectedHeaderLength &&
+      memcmp(headerBuffer, expectedHeader, expectedHeaderLength) == 0;
+  uint8_t closeStatus = flashDrive.closeFile();
+
+  if (!headerMatches) {
+    debugFail("verifyUSBTransactionCSVHeader", "Exported transaction file does not begin with the required header.");
+  }
+  if (closeStatus != ANSW_USB_INT_SUCCESS) {
+    debugHex16("verifyUSBTransactionCSVHeader", "USB file close status", closeStatus);
+    return false;
+  }
+
+  return headerMatches;
 }
 
 bool copyDailyArchiveFileToUSB(const String &dateText,
@@ -574,11 +723,28 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
            shortDate.c_str(), categoryCode);
 
   flashDrive.setFileName(destinationName);
-  uint8_t deleteStatus = flashDrive.deleteFile();
-  if (deleteStatus != ANSW_USB_INT_SUCCESS &&
-      deleteStatus != ANSW_ERR_MISS_FILE) {
+  uint8_t existingStatus = flashDrive.openFile();
+  if (existingStatus == ANSW_USB_INT_SUCCESS) {
+    uint8_t existingCloseStatus = flashDrive.closeFile();
+    if (existingCloseStatus != ANSW_USB_INT_SUCCESS) {
+      source.close();
+      debugValue("copyDailyArchiveFileToUSB", "Could not close existing USB file", destinationName);
+      debugHex16("copyDailyArchiveFileToUSB", "Existing file close status", existingCloseStatus);
+      return false;
+    }
+
+    flashDrive.setFileName(destinationName);
+    uint8_t deleteStatus = flashDrive.deleteFile();
+    if (deleteStatus != ANSW_USB_INT_SUCCESS) {
+      source.close();
+      debugValue("copyDailyArchiveFileToUSB", "Could not replace USB file", destinationName);
+      debugHex16("copyDailyArchiveFileToUSB", "USB delete status", deleteStatus);
+      return false;
+    }
+  } else if (existingStatus != ANSW_ERR_MISS_FILE) {
     source.close();
-    debugNumber("copyDailyArchiveFileToUSB", "Could not replace USB file; status", deleteStatus);
+    debugValue("copyDailyArchiveFileToUSB", "Could not inspect USB destination", destinationName);
+    debugHex16("copyDailyArchiveFileToUSB", "USB destination open status", existingStatus);
     return false;
   }
 
@@ -593,20 +759,26 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
   uint8_t buffer[64];
   bool writeSucceeded = true;
   uint32_t bytesWritten = 0;
-  while (source.available()) {
-    int bytesRead = source.read(buffer, sizeof(buffer));
-    if (bytesRead <= 0 ||
-        !flashDrive.writeFile(reinterpret_cast<char *>(buffer),
-                              static_cast<uint8_t>(bytesRead))) {
-      writeSucceeded = false;
-      break;
+  if (categoryCode == 'T') {
+    writeSucceeded = writeUSBTransactionCSV(source, bytesWritten);
+  } else {
+    while (source.available()) {
+      updateReturnUnlockRelock();
+      int bytesRead = source.read(buffer, sizeof(buffer));
+      if (bytesRead <= 0 ||
+          !flashDrive.writeFile(reinterpret_cast<char *>(buffer),
+                                static_cast<uint8_t>(bytesRead))) {
+        writeSucceeded = false;
+        break;
+      }
+      bytesWritten += static_cast<uint32_t>(bytesRead);
     }
-    bytesWritten += static_cast<uint32_t>(bytesRead);
   }
   source.close();
 
   uint8_t closeStatus = flashDrive.closeFile();
-  if (!writeSucceeded || bytesWritten != expectedSize ||
+  if (!writeSucceeded || bytesWritten == 0 ||
+      (categoryCode != 'T' && bytesWritten != expectedSize) ||
       closeStatus != ANSW_USB_INT_SUCCESS) {
     debugNumber("copyDailyArchiveFileToUSB", "USB write/close status", closeStatus);
     return false;
@@ -621,9 +793,14 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
 
   uint32_t destinationSize = flashDrive.getFileSize();
   uint8_t verifyCloseStatus = flashDrive.closeFile();
-  if (destinationSize != expectedSize ||
+  if (destinationSize != bytesWritten ||
       verifyCloseStatus != ANSW_USB_INT_SUCCESS) {
     debugNumber("copyDailyArchiveFileToUSB", "Exported file size mismatch", destinationSize);
+    return false;
+  }
+
+  if (categoryCode == 'T' &&
+      !verifyUSBTransactionCSVHeader(destinationName)) {
     return false;
   }
 
@@ -641,7 +818,7 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
 */
 void notifyUSBInserted() {
   debugOK("notifyUSBInserted");
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_CONNECTED);
+  showDownloadStatus(DOWNLOAD_USB_CONNECTED);
 }
 
 /*
@@ -656,9 +833,9 @@ void notifyUSBRemoved() {
   debugLog("notifyUSBRemoved", "USB removed or not detected.");
 
   if (currentPage == PAGE_ADMIN_DASHBOARD) {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_NOT_FOUND);
+    showDownloadStatus(DOWNLOAD_USB_NOT_FOUND);
   } else {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_IDLE);
+    showDownloadStatus(DOWNLOAD_IDLE);
   }
 }
 
@@ -706,7 +883,7 @@ bool writeTextFileToDaySD(String path, String content) {
 */
 bool appendLineToDaySD(String path, String line) {
   debugValue("appendLineToDaySD", "Path", path);
-  debugValue("appendLineToDaySD", "Line", line);
+  debugNumber("appendLineToDaySD", "CSV row length", line.length());
 
   if (!SD.begin(SD_STORAGE_CS, SPI)) {
     storageSDReady = false;
@@ -783,26 +960,32 @@ void downloadSelectedDateLogToUSB() {
   debugValue("downloadSelectedDateLogToUSB", "Requested date", selectedDateText);
 
   if (!isValidArchiveDate(selectedDateText)) {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
+    showDownloadStatus(DOWNLOAD_FAILED);
     debugFail("downloadSelectedDateLogToUSB", "Selected date is missing or invalid.");
     return;
   }
 
-  if (!usbHostConnected() || !flashDrive.driveReady()) {
+  bool deviceAttached = usbHostConnected();
+  bool driveReady = deviceAttached && flashDrive.driveReady();
+  debugValue("downloadSelectedDateLogToUSB", "USB device attached", deviceAttached ? "YES" : "NO");
+  debugValue("downloadSelectedDateLogToUSB", "USB drive mounted/ready", driveReady ? "YES" : "NO");
+  if (!driveReady) {
     usbInserted = false;
     previousUSBInserted = false;
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_NOT_FOUND);
+    debugHex16("downloadSelectedDateLogToUSB", "CH376 status", flashDrive.getStatus());
+    debugHex16("downloadSelectedDateLogToUSB", "CH376 error", flashDrive.getError());
+    showDownloadStatus(DOWNLOAD_USB_NOT_FOUND);
     debugFail("downloadSelectedDateLogToUSB", "USB drive is not mounted or ready.");
     return;
   }
 
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_IN_PROGRESS);
+  showDownloadStatus(DOWNLOAD_IN_PROGRESS);
 
   digitalWrite(USB_CS, HIGH);
   digitalWrite(RFID_CS, HIGH);
   if (!SD.begin(SD_STORAGE_CS, SPI)) {
     digitalWrite(SD_STORAGE_CS, HIGH);
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
+    showDownloadStatus(DOWNLOAD_FAILED);
     debugFail("downloadSelectedDateLogToUSB", "SD card not available at CS GPIO14.");
     return;
   }
@@ -829,7 +1012,7 @@ void downloadSelectedDateLogToUSB() {
   digitalWrite(SD_STORAGE_CS, HIGH);
 
   if (!exportSucceeded || !anySourceExists || exportedCount == 0) {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
+    showDownloadStatus(DOWNLOAD_FAILED);
     if (!anySourceExists) {
       debugFail("downloadSelectedDateLogToUSB", "No daily archive files exist for the selected date.");
     } else if (exportSucceeded) {
@@ -840,7 +1023,7 @@ void downloadSelectedDateLogToUSB() {
     return;
   }
 
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_SUCCESS);
+  showDownloadStatus(DOWNLOAD_SUCCESS);
   debugNumber("downloadSelectedDateLogToUSB", "Archive files exported", exportedCount);
   debugOK("downloadSelectedDateLogToUSB");
 }

@@ -82,6 +82,7 @@ Current Log:
   the active date are held for display; the daily archive remains on SD.
 - Cards display newest-first: card 1 is the latest event. Scrolling down moves
   toward older events; newly logged events return the view to card 1.
+- Borrower Name on current-log cards displays only the first name.
 
 Transaction Log:
 - Base = 0x3000
@@ -165,7 +166,12 @@ Display Idle / Backlight Control:
 Admin authentication:
 - Admin Login Page = 5; Admin Dashboard = 7.
 - Page 7 and admin-only pages require a successful PIN login.
-- Default PIN = 3030; saved PIN is stored in ESP32 Preferences.
+- Fresh-install default PIN = 0000 when no saved PIN exists; a saved PIN in
+  ESP32 Preferences takes precedence.
+- Admin PIN input = 0x1040. The ESP32 retains the received PIN in RAM for
+  verification; while hidden, it writes four ASCII '*' bytes (0x2A) to this VP.
+- Show-password toggle = 0x3A03, touch value 0x0001. Each event toggles
+  visibility; hidden writes "****", visible restores the entered PIN value.
 
 
 Page 27 Update Password VP Map
@@ -187,10 +193,9 @@ Page 27 Update Password VP Map
 
 Storage hardware:
 - One SD card on SPI chip select GPIO14.
-- CH376S USB host: SPI chip select GPIO25, active-low interrupt GPIO35.
-- GPIO35 is input-only and has no internal pull-up; verify the CH376S module
-  provides a suitable INT pull-up or install an external pull-up compatible
-  with the module logic voltage.
+- CH376S USB host: SPI chip select GPIO13, active-low interrupt GPIO25.
+- GPIO25 supports an internal pull-up; verify the CH376S interrupt output is
+  compatible with ESP32 logic levels.
 - Daily archives: /daily/YYYY-MM-DD/
 - Monthly archives: /monthly/YYYY-MM/
 - Daily and monthly records are mirrored on this same card.
@@ -200,6 +205,10 @@ Storage hardware:
 - Download status 0x0004 reports that one or more archive files were exported
   and their resulting sizes matched the SD sources; physical verification is
   still required.
+- USB connected, not-found, failed, and success statuses clear to idle after
+  five seconds.
+- Serial diagnostics do not print PIN input, typed text, borrower names, QR
+  contents/codes, RFID UIDs, or fingerprint template IDs.
 
 Updated behavior:
 - Registered RFID key returns are scanned only on Home Dashboard Pages 2/3.
