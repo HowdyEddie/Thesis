@@ -1,7 +1,7 @@
 SMARTLOCKER STORAGE - PROJECT PROGRESS
 =====================================
 
-UPDATED: 2026-10-26 (20:29)
+UPDATED: 2026-10-27 (21:36)
 PURPOSE: Compact handoff/progress record aligned with the project conversation.
 PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
 
@@ -31,11 +31,22 @@ CURRENT PROJECT STATE
 [DONE] Latest PlatformIO build succeeded on 2026-10-11 after current-log
        restoration, safety-switch, and dashboard slot-toggle changes.
        RAM: 47,032 bytes; flash: 461,209 bytes.
-[DONE] CH376S support integrated with djuseeq/Ch376msc 1.4.5 using CS GPIO25
-       and INT GPIO35. The firmware now initializes/detects the controller,
+[DONE] Latest PlatformIO build succeeded on 2026-10-27 after adding TUP-code
+       persistence for QR borrows, legacy transaction-row compatibility,
+       TUP-code export, and USB transaction-header read-back verification.
+       RAM: 52,960 bytes; flash: 482,161 bytes.
+[DONE] PlatformIO build succeeded on 2026-10-27 after QR scanning, account
+       fingerprint deletion, USB export, download-status, CSV reader, timer
+       servicing, Serial privacy, and transaction-export updates.
+[DONE] CH376S support integrated with djuseeq/Ch376msc 1.4.5 using CS GPIO13
+       and INT GPIO25. The firmware now initializes/detects the controller,
        polls insertion/removal, and exports selected-date daily CSV archives
        to 8.3 filenames on the USB root, replacing prior copies and verifying
-       exported file sizes against their SD sources.
+       exported file sizes. QR borrow transaction rows persist the scanned
+       TUP code; the USB transaction CSV exports seven labeled columns with
+       borrow and return actions as separate rows. Seven-field legacy SD rows
+       remain readable and export with a blank TUP CODE. The transaction
+       export header is read back from USB before success is reported.
 [DONE] PlatformIO build succeeded on 2026-10-19 with the CH376msc dependency.
        RAM: 47,136 bytes; latest flash: 471,469 bytes. Compile verification
        only; physical USB hardware has not yet been tested.
@@ -43,8 +54,8 @@ CURRENT PROJECT STATE
        templates are added. Hosted esp32dev build passed on 2026-10-19
        (GitHub Actions run #2); this verifies compilation only, not hardware.
 [DONE] One SD card is configured at GPIO14 for both daily and monthly storage.
-[DONE] RFID key returns are supported on the Locked Screen and Home Dashboard
-       pages 2/3; taken-slot state is stored in ESP32 Preferences.
+[DONE] RFID key returns are supported on Home Dashboard pages 2/3 only;
+       taken-slot state is stored in ESP32 Preferences.
 [DONE] Borrow/return slot outputs use timed relocking. Admin-only pages and
        controls require an authenticated admin session.
 [DONE] Optional QR borrower lookup supports /students.csv on the SD root.
@@ -116,6 +127,17 @@ CURRENT PROJECT STATE
              interval before firmware initializes the MCPs.
 [DONE] Project feature/flow guide and DWIN VP map are in FEATURES_FLOW.txt and
        VP_VALUE_MAPPING.txt.
+[DONE] QR scans continue listening after empty/unparseable data and tolerate
+       500 ms between bytes; loop polls QR input before and after other work.
+[DONE] Account deletion now removes the sensor template before deleting the
+       Preferences record, preserving the account if sensor deletion fails.
+[DONE] USB export checks whether an output file exists before replacing it;
+       connected/success/failure statuses clear to idle after five seconds.
+[DONE] CSV readers now assemble complete quoted records, including embedded
+       newlines. Timer servicing continues through known wait and file loops.
+[DONE] Serial diagnostics redact user-entered values and biometric/tag IDs.
+[DONE] Documentation now reflects the fresh-install PIN (0000), RFID return
+       pages, USB pins/status lifecycle, and current CSV handling.
 [DONE] Progress through the conversation: .ino integration was replaced by
        implementation headers included by main.cpp; a successful build was
        reached before and after the later storage/feature updates.
@@ -142,7 +164,7 @@ UPCOMING WORK - PRIORITY ORDER
      names the failure and the DWIN reaches Page 1 without hanging.
    - Confirm missing CH376S is reported but does not prevent boot or manual
      borrower entry when the other required locker hardware is present.
-   - Test CH376S absent with CS GPIO25 and INT GPIO35 wired as configured;
+   - Test CH376S absent with CS GPIO13 and INT GPIO25 wired as configured;
      verify SPI pre-probe reports no controller and startup reaches Page 1.
    - Record which modules are available when testing partial-hardware startup;
      module readiness is reported to Serial, but slot operations are not gated
@@ -181,15 +203,18 @@ UPCOMING WORK - PRIORITY ORDER
    - Back up the SD card before reset/migration testing and retain test logs.
 3. [PENDING] Physically verify CH376S USB export using the tested module and
    a known-good FAT32 drive:
-   - Wire CS GPIO25 and INT GPIO35; verify the INT pull-up (GPIO35 has no
-     internal pull-up) and module power/logic-level requirements.
+   - Wire CS GPIO13 and INT GPIO25; verify the module's INT output and power/
+     logic-level requirements.
    - Check startup CH376S detection and USB insertion/removal status updates.
    - Export a selected date and confirm the USB root contains the expected
-     YYMMDDA/K/T/R.CSV files with data matching the SD daily archives.
+     YYMMDDA/K/T/R.CSV files; check the transaction CSV's seven-column header,
+     TUP codes, and borrow/return action rows against the SD daily archive.
+     The firmware now fails the export if the USB transaction file's header
+     cannot be read back correctly.
    - Retry the same date to verify replacement, then test missing/empty
      category files, USB removal during export, and low-space/error reporting.
-4. [SUGGESTED] Review deployment security: replace the default admin PIN
-   (3030) before deployment and define a secure first-run/admin recovery
+4. [SUGGESTED] Review deployment security: replace the fresh-install admin
+   PIN (0000) before deployment and define a secure first-run/admin recovery
    procedure.
 5. [SUGGESTED] Test reset and SD migration only with backed-up data; document
    the expected reset/migration outcomes after physical validation.
@@ -201,8 +226,8 @@ KNOWN LIMITATIONS / DO NOT CLAIM
 --------------------------------
 [PENDING]    CH376S download code is compile-verified but has not yet been
              physically tested with the SmartLocker hardware and USB drive.
-[LIMITATION] GPIO35 has no internal ESP32 pull-up. The CH376S INT line must
-             have a suitable module-provided or external pull-up.
+[NOTE]       GPIO25 supports an internal ESP32 pull-up. Verify the CH376S INT
+             output is compatible with ESP32 logic levels.
 [PENDING]    Firmware has compile verification, but physical-device results
              are still needed for RTC current-log restore, dashboard selection,
              newest-first log views, startup fail-soft behavior, and USB export.

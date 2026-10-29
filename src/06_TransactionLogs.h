@@ -71,11 +71,13 @@ void addDateLogIfMissing(String dateText) {
   How to use:
     Called before slot state or output changes for a borrow/return action.
 */
-bool addTransactionLog(String keyNo, String borrowerName, String keyName, String borrowedTime, String returnedTime, String userName, String dateText) {
+bool addTransactionLog(String keyNo, String borrowerName, String keyName,
+                      String borrowedTime, String returnedTime,
+                      String userName, String dateText, String studentCode) {
   String csvLine = dateText + "," + csvEscapeField(keyNo) + "," +
                    csvEscapeField(borrowerName) + "," + csvEscapeField(keyName) + "," +
                    csvEscapeField(borrowedTime) + "," + csvEscapeField(returnedTime) + "," +
-                   csvEscapeField(userName);
+                   csvEscapeField(userName) + "," + csvEscapeField(studentCode);
 
   if (!appendLineToDaySD("/transactions.csv", csvLine)) {
     debugFail("addTransactionLog", "Daily transaction was not committed; locker state was not changed.");

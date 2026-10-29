@@ -151,9 +151,6 @@ void keyboardAddChar(char c) {
 
   keyboardText += c;
   writeVPText(VP_KEYBOARD_TEXT, keyboardText.c_str(), KEYBOARD_FIELD_BYTES);
-
-  Serial.print("Keyboard text: ");
-  Serial.println(keyboardText);
 }
 
 /*
@@ -195,8 +192,7 @@ void keyboardClear() {
     Called when Enter/OK sends 0x000D.
 */
 void keyboardEnter() {
-  Serial.print("Keyboard final text: ");
-  Serial.println(keyboardText);
+  debugNumber("keyboardEnter", "Input length", keyboardText.length());
 
   if (keyboardTarget == KB_TARGET_REGISTER_USER_NAME) {
     pendingRegisterUserName = keyboardText;

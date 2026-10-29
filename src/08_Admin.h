@@ -20,6 +20,7 @@
 
     Admin Login Page:
       PIN input VP = 0x1040
+      Show-password toggle VP = 0x3A03, value 0x0001
       Login VP    = 0x1043, value 0x0001
       Back VP     = 0x1044, value 0x0001
 
@@ -29,7 +30,32 @@
       Maintenance VP = 0x1046, value 0x0001
       Download VP    = 0x1047, value 0x0001
 */
+void renderAdminPINInput() {
+  if (!adminInputReceived) {
+    writeVPWord(VP_ADMIN_PIN_INPUT, 0);
+  } else if (adminPasswordVisible) {
+    writeVPText(VP_ADMIN_PIN_INPUT, adminInputText.c_str(), ADMIN_PIN_DIGITS);
+  } else {
+    const char maskedPIN[ADMIN_PIN_DIGITS + 1] = "####";
+    writeVPText(VP_ADMIN_PIN_INPUT, maskedPIN, ADMIN_PIN_DIGITS);
+  }
+}
+
 bool handleAdminAccess(uint16_t vp, uint16_t value) {
+  if (vp == VP_ADMIN_SHOW_PASSWORD) {
+    writeVPWord(VP_ADMIN_SHOW_PASSWORD, 0);
+    if (currentPage != PAGE_ADMIN_LOGIN) return true;
+
+    if (value == 1) {
+      adminPasswordVisible = !adminPasswordVisible;
+      renderAdminPINInput();
+    } else {
+      debugNumber("handleAdminAccess", "Ignoring show-password event with unexpected value", value);
+    }
+
+    return true;
+  }
+
   // Admin button from Locked/Home pages.
   // This opens Admin Login first, not the Admin Dashboard.
   if (vp == VP_ADMIN_OPEN) {
@@ -43,11 +69,31 @@ bool handleAdminAccess(uint16_t vp, uint16_t value) {
   // The password is checked only after the Login button is pressed.
   if (vp == VP_ADMIN_PIN_INPUT) {
     adminInputValue = value;
-    adminInputText = pinValueToFourDigitText(value);
-    adminInputReceived = true;
+    bool receivedFourDigitText = dwinReceivedWordCount >= 2;
+    char pinCharacters[ADMIN_PIN_DIGITS];
+    pinCharacters[0] = (char)(value >> 8);
+    pinCharacters[1] = (char)(value & 0xFF);
+    pinCharacters[2] = (char)(dwinReceivedSecondWord >> 8);
+    pinCharacters[3] = (char)(dwinReceivedSecondWord & 0xFF);
 
-    debugHex16("handleAdminAccess", "Admin PIN input raw value", adminInputValue);
-    debugValue("handleAdminAccess", "Admin PIN input text", adminInputText);
+    for (uint8_t i = 0; receivedFourDigitText && i < ADMIN_PIN_DIGITS; i++) {
+      if (!isDigit(pinCharacters[i])) {
+        receivedFourDigitText = false;
+      }
+    }
+
+    if (receivedFourDigitText) {
+      adminInputText = "";
+      for (uint8_t i = 0; i < ADMIN_PIN_DIGITS; i++) {
+        adminInputText += pinCharacters[i];
+      }
+    } else {
+      adminInputText = pinValueToFourDigitText(value);
+    }
+    adminInputReceived = true;
+    renderAdminPINInput();
+
+    debugValue("handleAdminAccess", "Admin PIN input received", "****");
 
     return true;
   }
@@ -76,11 +122,12 @@ bool handleAdminAccess(uint16_t vp, uint16_t value) {
       adminInputValue = 0;
       adminInputText = "";
       adminInputReceived = false;
+      adminPasswordVisible = false;
 
-      writeVPWord(VP_ADMIN_PIN_INPUT, 0);
+      renderAdminPINInput();
       writeVPText(VP_ADMIN_LOGIN_STATUS_TEXT, "Access granted", 32);
       writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_GRANTED);
-      delay(300);
+      delayWithUnlockService(300);
 
       goToAdminDashboard();
     } else {
@@ -89,8 +136,9 @@ bool handleAdminAccess(uint16_t vp, uint16_t value) {
       adminInputValue = 0;
       adminInputText = "";
       adminInputReceived = false;
+      adminPasswordVisible = false;
 
-      writeVPWord(VP_ADMIN_PIN_INPUT, 0);
+      renderAdminPINInput();
       writeVPText(VP_ADMIN_LOGIN_STATUS_TEXT, "Wrong PIN", 32);
       writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_DENIED);
     }
@@ -197,7 +245,8 @@ void goBackFromAdminLogin() {
   adminInputValue = 0;
   adminInputText = "";
   adminInputReceived = false;
-  writeVPWord(VP_ADMIN_PIN_INPUT, 0);
+  adminPasswordVisible = false;
+  renderAdminPINInput();
 
   if (adminReturnPage == PAGE_LOCKED_SCREEN) {
     goToLockedScreen();
@@ -314,7 +363,6 @@ String normalizePINText(String pinText) {
 */
 String pinValueToFourDigitText(uint16_t value) {
   if (value == ADMIN_PASS_VALUE) {
-    // Compatibility with old projects that returned 0x3030 for the default PIN.
     return ADMIN_DEFAULT_PIN_TEXT;
   }
 
@@ -373,25 +421,25 @@ bool adminPINMatches(String pinText) {
 */
 void handleAdminDownload() {
   if (selectedDateText.length() == 0) {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_FAILED);
+    showDownloadStatus(DOWNLOAD_FAILED);
     debugFail("handleAdminDownload", "No selected date log.");
     return;
   }
 
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_CHECKING);
+  showDownloadStatus(DOWNLOAD_USB_CHECKING);
   debugValue("handleAdminDownload", "Selected date", selectedDateText);
 
   usbInserted = usbHostConnected();
   previousUSBInserted = usbInserted;
 
   if (!usbInserted) {
-    writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_NOT_FOUND);
+    showDownloadStatus(DOWNLOAD_USB_NOT_FOUND);
     debugFail("handleAdminDownload", "USB not inserted or not detected.");
     return;
   }
 
-  writeVPWord(VP_DOWNLOAD_ICON, DOWNLOAD_USB_CONNECTED);
-  delay(300);
+  showDownloadStatus(DOWNLOAD_USB_CONNECTED);
+  delayWithUnlockService(300);
 
   downloadSelectedDateLogToUSB();
 }

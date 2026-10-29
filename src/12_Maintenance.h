@@ -67,7 +67,7 @@ void saveMaintenanceState() {
 
   writeVPText(VP_MAINT_STATUS_TEXT, "Changes saved", 32);
   writeVPWord(VP_MAINT_STATUS_ICON, ICON_CHANGES_SAVED);
-  delay(1000);
+  delayWithUnlockService(1000);
   Serial.println("Maintenance slot state saved.");
   writeVPWord(VP_MAINT_STATUS_ICON, ICON_IDLE);
 }

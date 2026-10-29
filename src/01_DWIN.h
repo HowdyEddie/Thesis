@@ -25,11 +25,22 @@ void handleDWIN(uint16_t vp, uint16_t value) {
 
   registerUserActivity("DWIN touch");
 
+  bool sensitivePINInput =
+      vp == VP_ADMIN_PIN_INPUT ||
+      (vp == VP_KEYBOARD_CMD &&
+       (keyboardTarget == KB_TARGET_ADMIN_PIN ||
+        keyboardTarget == KB_TARGET_UPDATE_OLD_PIN ||
+        keyboardTarget == KB_TARGET_UPDATE_NEW_PIN ||
+        keyboardTarget == KB_TARGET_UPDATE_CONFIRM_PIN));
   Serial.print("Received VP 0x");
   printHex16(vp);
-  Serial.print(" value 0x");
-  printHex16(value);
-  Serial.println();
+  if (sensitivePINInput) {
+    Serial.println(" value ****");
+  } else {
+    Serial.print(" value 0x");
+    printHex16(value);
+    Serial.println();
+  }
 
   if (handleDisplayWakeTouch(vp, value)) return;
   if (handleKeyboard(vp, value)) return;
@@ -88,11 +99,23 @@ bool dwinRead(uint16_t &receivedVP, uint16_t &receivedValue) {
 
     if (expectedLength > 0 && index >= expectedLength) {
       bool validFrame = false;
+      dwinReceivedWordCount = 0;
+      dwinReceivedSecondWord = 0;
 
       if (index >= 9 && buffer[3] == 0x83) {
-        receivedVP = ((uint16_t)buffer[4] << 8) | buffer[5];
-        receivedValue = ((uint16_t)buffer[7] << 8) | buffer[8];
-        validFrame = true;
+        uint8_t wordCount = buffer[6];
+        if (wordCount > 0) {
+          uint16_t requiredLength = 9 + ((uint16_t)(wordCount - 1) * 2);
+          if (index >= requiredLength) {
+            receivedVP = ((uint16_t)buffer[4] << 8) | buffer[5];
+            receivedValue = ((uint16_t)buffer[7] << 8) | buffer[8];
+            dwinReceivedWordCount = wordCount;
+            if (wordCount > 1) {
+              dwinReceivedSecondWord = ((uint16_t)buffer[9] << 8) | buffer[10];
+            }
+            validFrame = true;
+          }
+        }
       }
 
       index = 0;

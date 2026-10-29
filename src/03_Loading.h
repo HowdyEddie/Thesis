@@ -71,7 +71,7 @@ void runLoadingScreen() {
   delay(100);
 
   debugLog("runLoadingScreen", "Initializing CH376S USB host...");
-  reportStartupModuleStatus("CH376S USB host (CS 25 / INT 35)", initUSBHost());
+  reportStartupModuleStatus("CH376S USB host (CS GPIO13 / INT GPIO25)", initUSBHost());
   writeVPWord(VP_PROGRESS_ICON, 65);
   delay(100);
 

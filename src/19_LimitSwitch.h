@@ -99,6 +99,10 @@ void handleLimitSwitchSafetyLock() {
       renderCurrentLogs(CURRENT_LOG_CARDS_6);
       updateRTCDisplay();
     }
+
+    debugLog("handleLimitSwitchSafetyLock", "Reinitializing fingerprint sensor after safety lock event.");
+    fpsReady = initFingerprintModule();
+    lastFingerprintCheck = millis();
   }
 
   limitSwitchPreviouslyActive = limitActive;

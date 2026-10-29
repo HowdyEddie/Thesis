@@ -39,7 +39,7 @@ void addCurrentLog(String keyName, String borrowerName, String keyNumber, String
   }
 
   currentLogs[currentLogCount].keyName = keyName;
-  currentLogs[currentLogCount].borrowerName = borrowerName;
+  currentLogs[currentLogCount].borrowerName = getCurrentLogFirstName(borrowerName);
   currentLogs[currentLogCount].keyNumber = keyNumber;
   currentLogs[currentLogCount].timeText = timeText;
   currentLogs[currentLogCount].statusIcon = statusIcon;
@@ -78,13 +78,12 @@ bool loadCurrentLogsForDateFromSD(const String &dateText) {
   currentLogOffset = 0;
 
   while (transactionFile && transactionFile.available()) {
-    String line = transactionFile.readStringUntil('\n');
-    line.trim();
+    String line = readCSVRecord(transactionFile);
     if (line.length() == 0) continue;
 
-    String fields[7];
-    if (!parseCSVFields(line, fields, 7) || fields[0] != dateText) {
-      debugValue("loadCurrentLogsForDateFromSD", "Skipped malformed transaction row", line);
+    String fields[8];
+    if (!parseTransactionCSVFields(line, fields) || fields[0] != dateText) {
+      debugFail("loadCurrentLogsForDateFromSD", "Skipped malformed transaction row.");
       continue;
     }
 
@@ -101,7 +100,7 @@ bool loadCurrentLogsForDateFromSD(const String &dateText) {
 
     CurrentLogEntry &entry = currentLogs[currentLogCount++];
     entry.keyName = fields[3];
-    entry.borrowerName = isReturn ? "Returned" : fields[2];
+    entry.borrowerName = getCurrentLogFirstName(isReturn ? "Returned" : fields[2]);
     entry.keyNumber = fields[1];
     entry.timeText = timeText;
     entry.statusIcon = statusIcon;
@@ -123,6 +122,15 @@ bool loadCurrentLogsForDateFromSD(const String &dateText) {
   debugValue("loadCurrentLogsForDateFromSD", "Restored date", dateText);
   debugNumber("loadCurrentLogsForDateFromSD", "Current-date rows loaded", currentLogCount);
   return true;
+}
+
+String getCurrentLogFirstName(String borrowerName) {
+  borrowerName.trim();
+  int firstSpace = borrowerName.indexOf(' ');
+  if (firstSpace >= 0) {
+    borrowerName = borrowerName.substring(0, firstSpace);
+  }
+  return borrowerName;
 }
 
 void syncCurrentLogsWithRTCDate() {

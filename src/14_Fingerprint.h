@@ -56,20 +56,29 @@ bool initFingerprintModule() {
     Called automatically in loop() when currentPage == PAGE_LOCKED_SCREEN.
 */
 void checkLockedScreenFingerprint() {
-  if (!fpsReady) return;
   if (millis() - lastFingerprintCheck < 500) return;
 
   lastFingerprintCheck = millis();
+
+  if (!fpsReady) {
+    static unsigned long lastFingerprintRetry = 0;
+    if (millis() - lastFingerprintRetry < 5000) return;
+
+    lastFingerprintRetry = millis();
+    debugLog("checkLockedScreenFingerprint", "Fingerprint sensor is not ready; retrying initialization.");
+    fpsReady = initFingerprintModule();
+    return;
+  }
 
   int id = getFingerprintID();
 
   if (id > 0) {
     if (isFingerprintIDRegistered(id)) {
-      debugNumber("checkLockedScreenFingerprint", "Valid registered fingerprint ID", id);
+      debugLog("checkLockedScreenFingerprint", "Registered fingerprint matched.");
       setCurrentHomeUserFromFingerprint(id);
       goToHomeDashboard(PAGE_HOME_DASHBOARD_A);
     } else {
-      debugNumber("checkLockedScreenFingerprint", "Matched orphan sensor ID with no saved account", id);
+      debugLog("checkLockedScreenFingerprint", "Unlinked fingerprint template matched.");
     }
   }
 }
@@ -109,8 +118,7 @@ int getFingerprintID() {
   p = finger.fingerSearch(1);
 
   if (p == FINGERPRINT_OK) {
-    debugNumber("getFingerprintID", "Fingerprint matched ID", finger.fingerID);
-    debugNumber("getFingerprintID", "Match confidence", finger.confidence);
+    debugLog("getFingerprintID", "Fingerprint matched.");
     return finger.fingerID;
   }
 
@@ -146,7 +154,7 @@ uint16_t findFreeFingerprintID() {
     uint8_t p = finger.loadModel(id);
     if (p == FINGERPRINT_OK) continue;
 
-    debugNumber("findFreeFingerprintID", "Free fingerprint ID selected", id);
+    debugLog("findFreeFingerprintID", "Free fingerprint template slot selected.");
     return id;
   }
 
@@ -166,6 +174,7 @@ int waitForFingerImage(uint32_t timeoutMs) {
   unsigned long startTime = millis();
 
   while (millis() - startTime < timeoutMs) {
+    updateReturnUnlockRelock();
     int p = finger.getImage();
 
     if (p == FINGERPRINT_OK) return p;
@@ -174,7 +183,7 @@ int waitForFingerImage(uint32_t timeoutMs) {
       debugNumber("waitForFingerImage", "getImage waiting error", p);
     }
 
-    delay(80);
+    delayWithUnlockService(80);
   }
 
   return -1;
@@ -192,11 +201,12 @@ bool waitForFingerRelease(uint32_t timeoutMs) {
   unsigned long startTime = millis();
 
   while (millis() - startTime < timeoutMs) {
+    updateReturnUnlockRelock();
     uint8_t p = finger.getImage();
 
     if (p == FINGERPRINT_NOFINGER) return true;
 
-    delay(80);
+    delayWithUnlockService(80);
   }
 
   return false;
@@ -214,7 +224,7 @@ bool verifyStoredFingerprintID(uint16_t id) {
   uint8_t p = finger.loadModel(id);
 
   if (p == FINGERPRINT_OK) {
-    debugNumber("verifyStoredFingerprintID", "Template verified at ID", id);
+    debugLog("verifyStoredFingerprintID", "Stored fingerprint template verified.");
     return true;
   }
 
@@ -264,7 +274,7 @@ bool enrollFingerprintBlocking(uint16_t id) {
     return false;
   }
 
-  delay(500);
+  delayWithUnlockService(500);
 
   writeVPText(VP_REGISTER_STATUS_TEXT, "Place again", 32);
   writeVPWord(VP_REGISTER_STATUS_ICON, REG_PLACE_AGAIN);
@@ -305,7 +315,7 @@ bool enrollFingerprintBlocking(uint16_t id) {
   bool verified = verifyStoredFingerprintID(id);
 
   if (p == FINGERPRINT_OK || verified) {
-    debugNumber("enrollFingerprintBlocking", "Fingerprint stored and verified at ID", id);
+    debugLog("enrollFingerprintBlocking", "Fingerprint template stored and verified.");
     return true;
   }
 

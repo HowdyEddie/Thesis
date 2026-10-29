@@ -37,12 +37,12 @@ void handleQRScanner() {
   if (!qrReady || !qrScanActive || currentPage != PAGE_QR_BORROWER) return;
 
 #if HAS_QR_SOFTWARE_SERIAL
-  while (QRSerial.available()) {
+  while (qrScanActive && QRSerial.available()) {
     char c = QRSerial.read();
 
     if (c == '\n' || c == '\r') {
       if (qrBuffer.length() > 0) {
-        debugValue("handleQRScanner", "QR raw buffer", qrBuffer);
+        debugNumber("handleQRScanner", "QR data bytes received", qrBuffer.length());
         processQRData(qrBuffer);
         qrBuffer = "";
       }
@@ -54,8 +54,9 @@ void handleQRScanner() {
 
   // Some QR scanners do not send ENTER/newline.
   // If characters were received and then stopped, process the buffered QR text.
-  if (qrBuffer.length() > 0 && millis() - lastQRByteTime > 150) {
-    debugValue("handleQRScanner", "QR raw buffer by timeout", qrBuffer);
+  if (qrScanActive && qrBuffer.length() > 0 &&
+      millis() - lastQRByteTime >= QR_INTERBYTE_TIMEOUT_MS) {
+    debugNumber("handleQRScanner", "QR data bytes received before timeout", qrBuffer.length());
     processQRData(qrBuffer);
     qrBuffer = "";
   }
@@ -89,6 +90,7 @@ bool handleQRControls(uint16_t vp, uint16_t value) {
     // Manual typing temporarily pauses QR reading so the scanner cannot overwrite typed text.
     qrScanActive = false;
     qrBuffer = "";
+    pendingStudentCode = "";
     openKeyboard(KB_TARGET_BORROWER_NAME, PAGE_QR_BORROWER, false);
 
     return true;
@@ -184,8 +186,7 @@ void processQRData(String qrData) {
     pendingStudentCode = "";
     pendingBorrowerName = "";
 
-    writeVPText(VP_QR_STATUS_TEXT, "QR empty", 32);
-    writeVPWord(VP_QR_STATUS_ICON, QR_ICON_ERROR);
+    qrScanActive = true;
     debugFail("processQRData", "QR data is empty after cleanup.");
     renderQRBorrowerPage();
     return;
@@ -199,9 +200,8 @@ void processQRData(String qrData) {
     pendingBorrowerName = rosterName;
   }
 
-  debugValue("processQRData", "Clean QR data", qrData);
-  debugValue("processQRData", "Extracted borrower code", pendingStudentCode);
-  debugValue("processQRData", "Extracted borrower name", pendingBorrowerName);
+  debugNumber("processQRData", "Clean QR data length", qrData.length());
+  debugValue("processQRData", "Borrower name detected", pendingBorrowerName.length() > 0 ? "YES" : "NO");
 
   if (pendingBorrowerName.length() > 0) {
     writeVPText(VP_QR_STATUS_TEXT, "QR name detected", 32);
@@ -211,6 +211,7 @@ void processQRData(String qrData) {
     writeVPWord(VP_QR_STATUS_ICON, QR_ICON_MANUAL_REQUIRED);
   }
 
+  qrScanActive = pendingBorrowerName.length() == 0;
   renderQRBorrowerPage();
 }
 
@@ -500,8 +501,7 @@ String findStudentNameFromCode(String studentCode) {
 
   String matchedName = "";
   while (roster.available()) {
-    String line = roster.readStringUntil('\n');
-    line.trim();
+    String line = readCSVRecord(roster);
     if (line.length() == 0) continue;
 
     String fields[2];
@@ -560,8 +560,7 @@ void confirmBorrowerIdentity() {
   if (getRegisteredKeyForSlot(selectedSlotIndex, selectedKey)) {
     keyName = selectedKey.keyName;
     keyNumber = selectedKey.keyNumber;
-    debugValue("confirmBorrowerIdentity", "Registered key name found", keyName);
-    debugValue("confirmBorrowerIdentity", "Registered key number found", keyNumber);
+    debugLog("confirmBorrowerIdentity", "Registered key found for selected slot.");
   } else {
     debugNumber("confirmBorrowerIdentity", "No registered key for slot, using fallback slot number", selectedSlotIndex + 1);
   }
@@ -570,8 +569,12 @@ void confirmBorrowerIdentity() {
   String today = getRTCDateString();
 
   String transactionUser = currentHomeUserName.length() > 0 ? currentHomeUserName : "Unknown";
+  debugValue("confirmBorrowerIdentity", "TUP code captured",
+             pendingStudentCode.length() > 0 ? "YES" : "NO");
 
-  if (!addTransactionLog(keyNumber, pendingBorrowerName, keyName, borrowedTime, "--:--", transactionUser, today)) {
+  if (!addTransactionLog(keyNumber, pendingBorrowerName, keyName,
+                         borrowedTime, "--:--", transactionUser, today,
+                         pendingStudentCode)) {
     writeVPText(VP_QR_STATUS_TEXT, "Log save failed", 32);
     writeVPWord(VP_QR_STATUS_ICON, QR_ICON_ERROR);
     debugFail("confirmBorrowerIdentity", "Borrow cancelled because the daily transaction could not be committed.");
@@ -592,11 +595,10 @@ void confirmBorrowerIdentity() {
   writeVPText(VP_QR_STATUS_TEXT, "Borrow confirmed", 32);
   writeVPWord(VP_QR_STATUS_ICON, QR_ICON_CONFIRMED);
 
-  debugValue("confirmBorrowerIdentity", "Borrower confirmed", pendingBorrowerName);
-  debugValue("confirmBorrowerIdentity", "Borrower code", pendingStudentCode);
+  debugLog("confirmBorrowerIdentity", "Borrow identity confirmed.");
   debugNumber("confirmBorrowerIdentity", "Slot", selectedSlotIndex + 1);
 
-  delay(500);
+  delayWithUnlockService(500);
 
   int confirmedSlot = selectedSlotIndex;
   selectedSlotIndex = -1;

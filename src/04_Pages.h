@@ -251,6 +251,7 @@ void goToAdminLoginPage() {
   adminInputValue = 0;
   adminInputText = "";
   adminInputReceived = false;
+  adminPasswordVisible = false;
 
   changePage(PAGE_ADMIN_LOGIN);
   delay(120);
@@ -268,7 +269,8 @@ void goToAdminLoginPage() {
     Called automatically when Page 5 Admin Login opens.
 */
 void renderAdminLoginPage() {
-  writeVPWord(VP_ADMIN_PIN_INPUT, 0);
+  renderAdminPINInput();
+  writeVPWord(VP_ADMIN_SHOW_PASSWORD, 0);
   writeVPText(VP_ADMIN_LOGIN_STATUS_TEXT, "Enter admin PIN", 32);
   writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_WAITING);
 }
