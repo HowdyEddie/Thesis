@@ -30,6 +30,13 @@ Hardware and pin assignments
   Ch376msc library. GPIO25 supports an internal pull-up for the active-low INT
   line; verify that the module's output is compatible with ESP32 logic levels.
 - Active-high safety limit switch: GPIO34, external 10k pulldown to GND.
+- Active-high door-cover buzzer: GPIO12, driven by a suitable buzzer module
+  or transistor driver. GPIO12 is an ESP32 boot-strapping pin; keep its level
+  LOW during reset (use a pulldown on the driver input).
+- Cover enclosure trigger: GPIO15, active HIGH for a non-blocking 1-second
+  pulse after a fingerprint template is matched and validated against a saved
+  account. GPIO15 is an ESP32 boot-strapping pin; verify reset-time levels
+  with the connected driver.
 - 40 slot outputs are driven by three MCP23017 expanders at I2C addresses
   0x20, 0x21, and 0x22. HIGH activates/unlocks an output; LOW locks it.
 
@@ -77,8 +84,9 @@ interface. Module initialization results are reported through Serial only.
 User access and borrowing
 -------------------------
 1. On Page 1, a fingerprint must match a sensor template linked to a saved
-   account before the Home Dashboard opens. The account name becomes the
-   current user for borrow records.
+   account before the Home Dashboard opens. An unlinked template is denied.
+   The account name becomes the current user for borrow records. After the
+   dashboard transition is sent, GPIO15 pulses HIGH for one second.
 2. On Page 2 or 3, tapping an active, unoccupied slot selects it. Tapping that
    same slot again deselects it; tapping a different available slot moves the
    selection. This single-selection toggle works on both dashboards. The user
@@ -90,20 +98,27 @@ User access and borrowing
    manually with the on-screen keyboard. Scanned codes can optionally resolve
    through /students.csv. A scan without a line ending is processed after
    500 ms without received characters; empty or unparseable scans leave QR
-   listening active for another attempt. A valid borrower name pauses scanning
-   until the borrow is confirmed or rescanned.
+   listening active for another attempt. A valid scanned borrower name
+   immediately opens the selected slot and returns to the dashboard with a
+   pending confirmation popup.
    Pressing OK with no borrower name cancels the pending borrow, clears the
    slot selection, and returns to the dashboard.
-4. Confirming a borrower first appends and verifies the transaction in the
-   daily SD archive. If that commit fails, the borrow is cancelled and the
-   slot state/output remain unchanged. After a successful daily commit, RAM
-   logs/state and the slot output are updated. A failed monthly mirror is
-   queued for periodic retry and rechecked against daily archives at startup.
-5. The slot output automatically returns to the locked level after
-   RETURN_UNLOCK_MS. Timer checks continue during known long waits and
-   file-reading/copy loops; an individual hardware/library operation can
-   still delay the next check. The slot remains marked occupied until its
-   registered RFID key is scanned on Page 2 or 3.
+4. A recognized QR borrower name immediately stages the selected slot for
+   borrowing. For manual borrower entry, pressing Page 4 OK stages it. The
+   ESP32 opens the selected slot output, returns to the originating dashboard,
+   and writes value 0x0001 to confirmation-popup VP 0x3C00. The slot remains
+   open and the transaction is not yet logged.
+5. After taking the key, the user presses dashboard OK VP 0x1028. If an action
+   is pending, this same VP confirms it instead of starting another borrow.
+   The daily transaction is appended and verified first. On success, the
+   slot is marked taken and persisted, then its output is closed immediately.
+   If the transaction write fails, the popup/action remains pending and the
+   slot stays open for retry. The display idle timeout is suspended while a
+   confirmation is pending.
+6. VP 0x1029 cancels a pending action without recording it and closes the
+   slot. An active-high limit-switch safety event also cancels pending work
+   and locks all outputs. A failed monthly mirror is queued for retry and
+   rechecked against daily archives at startup.
 
 RFID return flow
 ----------------
@@ -111,16 +126,20 @@ RFID return flow
    not scan RFID returns.
 2. The scanned UID must match a registered key whose slot is currently marked
    taken. Unknown keys and keys for unoccupied slots do not change the locker.
-3. The return transaction must first be appended and verified in the daily SD
-   archive. If that commit fails, the return is cancelled and the slot remains
-   borrowed/locked. After a successful daily commit, the slot is marked
-   available in Preferences, its output is activated for RETURN_UNLOCK_MS,
-   and the output is then relocked.
-4. Current logs and transaction history receive the committed return record.
-   Monthly archive mirrors are retried if needed. The auxiliary returns.csv
-   row is also written; its failure is reported without undoing a return whose
-   authoritative transaction row was already committed. Repeat scans of the
-   same UID are rate-limited after a successful return.
+3. A matched key stages a return: its registered slot output opens and popup
+   VP 0x3C00 is set to 0x0001. The slot remains marked taken and no return
+   transaction is written yet.
+4. After placing the key in the slot, the user presses dashboard OK VP 0x1028.
+   The daily return transaction is appended and verified before the slot is
+   marked available in Preferences and its output is closed. If the write
+   fails, the return remains pending and the slot stays open for retry.
+5. Current logs and transaction history receive the committed return record.
+   The auxiliary returns.csv row is attempted; a failure there does not undo
+   a return whose authoritative transaction was committed. Repeat scans of
+   the same UID are rate-limited after a successful confirmation.
+6. VP 0x1029 cancels a pending return without recording it and closes the
+   slot. An active-high limit-switch safety event cancels pending work and
+   locks all outputs.
 
 Admin flow and pages
 --------------------
@@ -219,6 +238,13 @@ Safety and display idle
   single selection. This behavior is implemented for both Pages 2 and 3.
 - After DISPLAY_IDLE_TIMEOUT_MS without user activity, unfinished input is
   cleared, the display returns to Page 1, and the DWIN backlight is turned off.
+- After the display backlight turns off, the GPIO12 buzzer waits 20 seconds,
+  then repeats a three-beep security pattern to indicate the door cover may be
+  open. The buzzer is silent while the active-high limit switch is HIGH. Any
+  user activity that wakes the display or an active limit switch resets the
+  countdown; the timer starts again after the display is off and the switch
+  is no longer active. The pattern is non-blocking and does not delay locker
+  control or display handling.
 - A DWIN Return Key Code / Basic Touch object using VP 0x13F0 can provide a
   dedicated wake touch. The first touch while asleep wakes only the display.
 

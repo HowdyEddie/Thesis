@@ -1,6 +1,10 @@
 VP VALUE MAPPING
 ================
 
+Hardware outputs:
+- GPIO15 cover enclosure trigger: LOW by default; pulses HIGH for 1000 ms
+  only after a fingerprint matches a template linked to a saved account.
+
 RTC:
 - Date text = 0x1500, 16 bytes / 8 words
 - Time text = 0x1510, 16 bytes / 8 words
@@ -11,6 +15,14 @@ Slots:
 - Slot 40 = 0x1027
 - Slot confirm OK = 0x1028
 - Slot cancel = 0x1029
+- Confirmation popup trigger = 0x3C00, ESP32 writes 0x0001 to show and 0x0000
+  to clear it.
+- The same dashboard OK VP 0x1028 has two context-dependent roles:
+  with no pending key action, it starts the selected-slot borrow flow; while a
+  borrow/return popup is pending, it confirms the physical key action.
+- After successful borrow/return logging, the slot output closes immediately.
+  It stays open indefinitely while the confirmation is pending, except that
+  cancellation or the active-high safety limit switch closes it.
 - Selected count = 0x1030
 - Slot state values: Available 0x0000, Selected 0x0001; inactive/taken values
   are defined by SLOT_NA / SLOT_TAKEN in main.cpp.
@@ -213,9 +225,15 @@ Storage hardware:
 Updated behavior:
 - Registered RFID key returns are scanned only on Home Dashboard Pages 2/3.
 - Slot occupancy is persisted in ESP32 Preferences.
-- Slot outputs are timed and relocked after borrowing or returning.
+- Slot outputs remain open during the pending borrow/return confirmation and
+  close immediately after a successful transaction commit.
 - Home Dashboard slot selection toggles off on a repeated tap; a different
   available slot replaces the previous selection on both Pages 2 and 3.
 - Dashboard slot/confirm input is ignored while the safety limit switch is
   active; stale selections are cleared on page transitions.
+- QR borrower recognition stages a borrow and opens the selected slot before
+  showing popup VP 0x3C00. RFID recognition on Pages 2/3 stages a return and
+  opens its registered slot. In both cases the dashboard OK VP 0x1028 commits
+  the transaction only after user confirmation; VP 0x1029 cancels without a
+  transaction. The idle-display timer is suspended during confirmation.
 - See FEATURES_FLOW.txt for complete hardware, storage layout, and user flows.

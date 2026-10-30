@@ -213,6 +213,10 @@ void processQRData(String qrData) {
 
   qrScanActive = pendingBorrowerName.length() == 0;
   renderQRBorrowerPage();
+
+  if (pendingBorrowerName.length() > 0) {
+    confirmBorrowerIdentity();
+  }
 }
 
 /*
@@ -526,14 +530,17 @@ String findStudentNameFromCode(String studentCode) {
 /*
   Function: confirmBorrowerIdentity()
   Description:
-    Confirms Page 4 borrower identity after manual name entry or QR parsing.
+    Stages the selected slot for a borrow after manual name confirmation or
+    successful QR name parsing. The transaction is committed later from the
+    dashboard confirmation button.
 
     Current working methods:
-      Manual borrower name -> OK -> log transaction -> mark slot taken -> unlock output.
-      QR borrower name     -> OK -> log transaction -> mark slot taken -> unlock output.
+      Manual borrower name -> Page 4 OK -> open slot -> dashboard popup.
+      QR borrower name -> open slot automatically -> dashboard popup.
 
   How to use:
-    Called when VP_SLOT_CONFIRM 0x1028 is pressed on Page 4.
+    Called after a successful QR scan or when VP_SLOT_CONFIRM 0x1028 is
+    pressed on Page 4 after manual name entry.
 */
 void confirmBorrowerIdentity() {
   debugLog("confirmBorrowerIdentity", "Confirm borrower button pressed.");
@@ -565,55 +572,18 @@ void confirmBorrowerIdentity() {
     debugNumber("confirmBorrowerIdentity", "No registered key for slot, using fallback slot number", selectedSlotIndex + 1);
   }
 
-  String borrowedTime = getRTCTimeString();
-  String today = getRTCDateString();
-
   String transactionUser = currentHomeUserName.length() > 0 ? currentHomeUserName : "Unknown";
   debugValue("confirmBorrowerIdentity", "TUP code captured",
              pendingStudentCode.length() > 0 ? "YES" : "NO");
 
-  if (!addTransactionLog(keyNumber, pendingBorrowerName, keyName,
-                         borrowedTime, "--:--", transactionUser, today,
-                         pendingStudentCode)) {
-    writeVPText(VP_QR_STATUS_TEXT, "Log save failed", 32);
-    writeVPWord(VP_QR_STATUS_ICON, QR_ICON_ERROR);
-    debugFail("confirmBorrowerIdentity", "Borrow cancelled because the daily transaction could not be committed.");
+  if (!beginBorrowConfirmation(keyNumber, keyName, pendingBorrowerName,
+                               pendingStudentCode, transactionUser)) {
     return;
   }
-
-  addCurrentLog(keyName, pendingBorrowerName, keyNumber, borrowedTime, LOG_STATUS_BORROWED);
-
-  slotTaken[selectedSlotIndex] = true;
-  saveSlotTakenState((uint8_t)selectedSlotIndex);
-  slotDisplayState[selectedSlotIndex] = SLOT_TAKEN;
-  slotSelected[selectedSlotIndex] = false;
-  updateSlotDisplay(selectedSlotIndex);
-
-  setSlotLockOutput(selectedSlotIndex, true);
-  startTimedSlotUnlock((uint8_t)selectedSlotIndex);
-
-  writeVPText(VP_QR_STATUS_TEXT, "Borrow confirmed", 32);
-  writeVPWord(VP_QR_STATUS_ICON, QR_ICON_CONFIRMED);
-
-  debugLog("confirmBorrowerIdentity", "Borrow identity confirmed.");
-  debugNumber("confirmBorrowerIdentity", "Slot", selectedSlotIndex + 1);
-
-  delayWithUnlockService(500);
-
-  int confirmedSlot = selectedSlotIndex;
-  selectedSlotIndex = -1;
   pendingBorrowerName = "";
   pendingStudentCode = "";
   pendingQRRawData = "";
   qrScanActive = false;
-
-  if (qrReturnPage == PAGE_HOME_DASHBOARD_B) {
-    goToHomeDashboard(PAGE_HOME_DASHBOARD_B);
-  } else {
-    goToHomeDashboard(PAGE_HOME_DASHBOARD_A);
-  }
-
-  debugNumber("confirmBorrowerIdentity", "Unlocked output for slot", confirmedSlot + 1);
 }
 
 /*

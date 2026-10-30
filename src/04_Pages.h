@@ -142,7 +142,7 @@ void goToHomeDashboard(uint16_t pageID) {
     Opens Page 4 after the user selects a slot and presses OK.
     Page 4 supports two borrower-identification methods:
       1. Manual borrower name using the custom keyboard.
-      2. QR scan student code, for future student-code database lookup.
+      2. QR scan borrower name/code, with optional /students.csv lookup.
 
   How to use:
     Called when VP_SLOT_CONFIRM is pressed from Page 2 or Page 3.

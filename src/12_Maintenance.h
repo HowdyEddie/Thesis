@@ -143,10 +143,13 @@ bool handleMaintenanceControls(uint16_t vp, uint16_t value) {
     Home Dashboard behavior:
       Tap an available slot to select it. Tap that same slot again to
       deselect it; tapping another available slot moves the selection.
-      Press OK/Confirm VP 0x1028 -> open Page 4.
+      Press OK/Confirm VP 0x1028 -> open Page 4. After the slot is prepared,
+      the same VP confirms the pending key take/return.
 
     Page 4 QR/Borrower behavior:
-      Press OK/Confirm VP 0x1028 -> confirm borrower name and log transaction.
+      Press OK/Confirm VP 0x1028 -> open the selected slot and show the
+      confirmation popup for manually entered names. QR names stage
+      automatically when recognized.
 
     Maintenance behavior:
       Slots can be multi-selected so Active/Inactive can be applied to many slots.
@@ -182,6 +185,11 @@ bool handleSlotControls(uint16_t vp, uint16_t value) {
     writeVPWord(VP_SLOT_CONFIRM, 0);
 
     if (currentPage == PAGE_HOME_DASHBOARD_A || currentPage == PAGE_HOME_DASHBOARD_B) {
+      if (pendingLockerAction.type != LOCKER_ACTION_NONE) {
+        confirmPendingLockerAction();
+        return true;
+      }
+
       if (selectedSlotIndex < 0) {
         Serial.println("No slot selected. Select a slot before pressing OK.");
         return true;
@@ -205,7 +213,9 @@ bool handleSlotControls(uint16_t vp, uint16_t value) {
   if (vp == VP_SLOT_CANCEL) {
     writeVPWord(VP_SLOT_CANCEL, 0);
 
-    if (currentPage == PAGE_QR_BORROWER) {
+    if (pendingLockerAction.type != LOCKER_ACTION_NONE) {
+      cancelPendingLockerAction();
+    } else if (currentPage == PAGE_QR_BORROWER) {
       cancelQRBorrowerPage();
     } else {
       clearSlotSelections();
@@ -230,6 +240,11 @@ bool handleSlotControls(uint16_t vp, uint16_t value) {
   }
 
   if (currentPage == PAGE_HOME_DASHBOARD_A || currentPage == PAGE_HOME_DASHBOARD_B) {
+    if (pendingLockerAction.type != LOCKER_ACTION_NONE) {
+      Serial.println("Slot selection ignored while a key confirmation is pending.");
+      return true;
+    }
+
     if (!slotMaintenanceActive[slotIndex]) {
       Serial.println("Slot is inactive.");
       writeVPWord(vp, SLOT_NA);

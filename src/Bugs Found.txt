@@ -18,6 +18,9 @@ Software
   events are exported as separate action rows. Legacy/manual/return rows
   without a code export an empty TUP CODE field. The transaction header is
   read back from USB before export success is reported.
++ Borrow/return slot outputs remain open until a dashboard confirmation. The
+  transaction is committed only after confirmation; cancel and safety-switch
+  handling close the pending slot without recording the action.
 
 Prototype verification
 ----------------------
@@ -25,3 +28,5 @@ Code fixes above require physical testing on the locker hardware. In
 particular, measure relock timing during SD/USB activity and verify that
 quoted multiline fields survive write, reload, and archive migration. Verify
 TUP-code storage and transaction export on a USB drive.
+Verify borrow/return confirmation popup, delayed transaction commit, cancel,
+and active-high safety-switch behavior on the prototype.
