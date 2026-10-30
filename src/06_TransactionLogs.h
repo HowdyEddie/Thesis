@@ -236,7 +236,15 @@ void renderDateCards() {
     uint16_t vp = VP_DATE_CARD_BASE + (card * DATE_CARD_STEP);
 
     if (index < dateLogCount) {
-      writeVPText(vp, dateLogs[index].c_str(), DATE_CARD_BYTES);
+      String displayDate = dateLogs[index];
+      if (displayDate.length() == 10 &&
+          displayDate.charAt(4) == '-' &&
+          displayDate.charAt(7) == '-') {
+        displayDate = displayDate.substring(5, 7) + "/" +
+                      displayDate.substring(8, 10) + "/" +
+                      displayDate.substring(2, 4);
+      }
+      writeVPText(vp, displayDate.c_str(), DATE_CARD_BYTES);
     } else {
       writeVPText(vp, "", DATE_CARD_BYTES);
     }

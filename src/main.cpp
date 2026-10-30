@@ -95,7 +95,7 @@
 #define BUZZER_PIN                  12
 #define BUZZER_ACTIVE_LEVEL         HIGH
 #define BUZZER_INACTIVE_LEVEL       LOW
-#define BUZZER_ALERT_DELAY_MS       20000UL
+#define BUZZER_ALERT_DELAY_MS       30000UL
 #define BUZZER_PATTERN_CYCLE_MS     2000UL
 
 // Cover enclosure trigger; pulse only after a registered fingerprint is validated.
@@ -165,7 +165,7 @@
 
 // If no user activity is detected for this long, ESP32 returns to
 // Locked Screen and turns off/dims the DWIN backlight.
-#define DISPLAY_IDLE_TIMEOUT_MS    30000UL
+#define DISPLAY_IDLE_TIMEOUT_MS    60000UL
 
 // Optional DWIN touch object for waking the display when the backlight is off.
 // Add a Return Key Code / Basic Touch object on the Locked Screen using this VP.
