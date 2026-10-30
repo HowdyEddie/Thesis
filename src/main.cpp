@@ -81,8 +81,8 @@
 #define RFID_RST   4
 
 #define SD_STORAGE_CS  14
-#define USB_CS       13   // CH376S SPI chip select
-#define USB_INT      25   // CH376S active-low interrupt; internal pull-up enabled by the library
+#define USB_CS         13   // CH376S SPI chip select
+#define USB_INT        25   // CH376S active-low interrupt; internal pull-up enabled by the library
 
 // One limit switch safety input.
 // GPIO34 is input-only and available in this project.
@@ -90,6 +90,19 @@
 #define LIMIT_SWITCH_PIN            34
 #define LIMIT_SWITCH_ACTIVE_LEVEL   HIGH
 #define LIMIT_SWITCH_CHECK_INTERVAL 50
+
+// Active-high buzzer for the inactive display / open-cover alert.
+#define BUZZER_PIN                  12
+#define BUZZER_ACTIVE_LEVEL         HIGH
+#define BUZZER_INACTIVE_LEVEL       LOW
+#define BUZZER_ALERT_DELAY_MS       20000UL
+#define BUZZER_PATTERN_CYCLE_MS     2000UL
+
+// Cover enclosure trigger; pulse only after a registered fingerprint is validated.
+#define COVER_LOCK_PIN              15
+#define COVER_LOCK_ACTIVE_LEVEL     HIGH
+#define COVER_LOCK_INACTIVE_LEVEL   LOW
+#define COVER_LOCK_PULSE_MS         1000UL
 
 // Slot output behavior through MCP23017 expanders.
 // In this project: HIGH = unlock/active, LOW = lock/inactive.
@@ -113,7 +126,7 @@
 #define PAGE_NEW_KEY_REG         10
 #define PAGE_MAINTENANCE_A       11
 #define PAGE_MAINTENANCE_B       12
-#define PAGE_UPDATE_PASSWORD      27
+#define PAGE_UPDATE_PASSWORD     27
 
 // Custom keyboard pages from your adjusted code
 #define PAGE_KEYBOARD_LOWER      13
@@ -170,6 +183,8 @@
 #define VP_SLOT_CONFIRM     0x1028
 #define VP_SLOT_CANCEL      0x1029
 #define VP_SELECTED_COUNT   0x1030
+#define VP_KEY_CONFIRM_POPUP 0x3C00
+#define KEY_CONFIRM_POPUP_SHOW 0x0001
 
 #define SLOT_AVAILABLE      0x0000
 #define SLOT_SELECTED       0x0001
@@ -472,6 +487,23 @@ struct KeyEntry {
   bool used;
 };
 
+enum PendingLockerActionType : uint8_t {
+  LOCKER_ACTION_NONE,
+  LOCKER_ACTION_BORROW,
+  LOCKER_ACTION_RETURN
+};
+
+struct PendingLockerAction {
+  PendingLockerActionType type;
+  uint8_t slotIndex;
+  uint8_t keyIndex;
+  String borrowerName;
+  String studentCode;
+  String keyNumber;
+  String keyName;
+  String userName;
+};
+
 enum KeyboardTarget {
   KB_TARGET_NONE,
   KB_TARGET_REGISTER_USER_NAME,
@@ -609,11 +641,19 @@ uint16_t qrReturnPage = PAGE_HOME_DASHBOARD_A;
 String pendingBorrowerName = "";
 String pendingStudentCode = "";
 String pendingQRRawData = "";
+PendingLockerAction pendingLockerAction = {};
 
 unsigned long lastUserActivityMillis = 0;
 bool dwinBacklightSleeping = false;
 bool adminAuthenticated = false;
 
+unsigned long buzzerCountdownStartedAt = 0;
+unsigned long buzzerPatternStartedAt = 0;
+bool buzzerCountdownRunning = false;
+bool buzzerPatternRunning = false;
+bool buzzerOutputOn = false;
+unsigned long coverLockPulseStartedAt = 0;
+bool coverLockPulseActive = false;
 // =======================================================
 // FUNCTION DECLARATIONS
 // =======================================================
@@ -641,6 +681,11 @@ void registerUserActivity(const char *source);
 void handleDisplayIdleSleep();
 bool handleDisplayWakeTouch(uint16_t vp, uint16_t value);
 void clearTemporarySessionForIdleSleep();
+void initBuzzer();
+void handleDoorCoverBuzzer();
+void stopDoorCoverBuzzer();
+void triggerCoverLockPulse();
+void updateCoverLockPulse();
 
 // RTC
 bool initRTCModule();
@@ -784,6 +829,14 @@ void saveSlotTakenState(uint8_t slotIndex);
 void renderMaintenanceSlots();
 bool handleMaintenanceControls(uint16_t vp, uint16_t value);
 bool handleSlotControls(uint16_t vp, uint16_t value);
+bool beginBorrowConfirmation(String keyNumber, String keyName,
+                             String borrowerName, String studentCode,
+                             String userName);
+bool beginRegisteredKeyReturn(uint8_t keyIndex);
+bool confirmPendingLockerAction();
+void cancelPendingLockerAction(bool relockSlot = true);
+void showKeyConfirmationPopup();
+void clearKeyConfirmationPopup();
 void setSelectedSlotsActive(bool active);
 void updateSlotDisplay(uint8_t slotIndex);
 void clearSlotSelections();
@@ -876,6 +929,8 @@ void downloadSelectedDateLogToUSB();
 #include "19_LimitSwitch.h"
 #include "20_DisplayIdle.h"
 #include "21_UpdatePassword.h"
+#include "22_Buzzer.h"
+#include "23_KeyConfirmation.h"
 
 // =======================================================
 // SETUP + LOOP
@@ -885,6 +940,7 @@ void setup() {
   Serial.begin(115200);
 
   initHardwarePins();
+  initBuzzer();
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setTimeOut(100);
   initIOExpanders();
@@ -895,6 +951,7 @@ void setup() {
   Serial.println("DWIN Smart Locker Full Modular Final Integrated Update Password Code Starting...");
 
   DWIN.begin(DWIN_BAUD, SERIAL_8N1, DWIN_RX, DWIN_TX);
+  clearKeyConfirmationPopup();
 
   initLimitSwitch();
   initMaintenanceStateDefaults();
@@ -910,6 +967,7 @@ void loop() {
   uint16_t value;
 
   updateReturnUnlockRelock();
+  updateCoverLockPulse();
   handleQRScanner();
 
   if (dwinRead(vp, value)) {
@@ -927,6 +985,7 @@ void loop() {
   monitorUSBInsertion();
   updateDownloadStatus();
   handleDisplayIdleSleep();
+  handleDoorCoverBuzzer();
 
   if (currentPage == PAGE_LOCKED_SCREEN ||
       currentPage == PAGE_HOME_DASHBOARD_A ||
@@ -940,6 +999,7 @@ void loop() {
   }
 
   updateReturnUnlockRelock();
-
+  updateCoverLockPulse();
   handleQRScanner();
+  handleDoorCoverBuzzer();
 }

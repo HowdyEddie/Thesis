@@ -1,7 +1,7 @@
 SMARTLOCKER STORAGE - PROJECT PROGRESS
 =====================================
 
-UPDATED: 2026-10-27 (21:36)
+UPDATED: 2026-10-30 (16:39)
 PURPOSE: Compact handoff/progress record aligned with the project conversation.
 PROJECT: SmartLockerStorage - ESP32 DevKit V4, DWIN display, locker hardware.
 
@@ -35,6 +35,21 @@ CURRENT PROJECT STATE
        persistence for QR borrows, legacy transaction-row compatibility,
        TUP-code export, and USB transaction-header read-back verification.
        RAM: 52,960 bytes; flash: 482,161 bytes.
+[DONE] PlatformIO build succeeded on 2026-10-29 with the GPIO12 buzzer
+       countdown and non-blocking three-beep security pattern. RAM: 52,968
+       bytes; flash: 482,577 bytes. Physical timing, switch inhibit, and
+       boot-strap voltage require verification.
+[DONE] Latest PlatformIO build succeeded on 2026-10-29 after implementing
+       key take/return confirmation with popup VP 0x3C00 and dashboard OK VP
+       0x1028. RAM: 53,056 bytes; flash: 485,569 bytes.
+[PENDING] Re-added GPIO15 cover-trigger pulse after registered fingerprint
+          validation. Fingerprint login diagnostics now distinguish a sensor
+          template match from saved-account authorization and report the
+          dashboard page selected; verify the full transition and pulse on
+          hardware.
+[PENDING] Physically test that slots remain open until confirmation,
+          transaction commit is deferred, cancellation closes without logging,
+          and the safety switch cancels pending actions.
 [DONE] PlatformIO build succeeded on 2026-10-27 after QR scanning, account
        fingerprint deletion, USB export, download-status, CSV reader, timer
        servicing, Serial privacy, and transaction-export updates.
@@ -56,8 +71,10 @@ CURRENT PROJECT STATE
 [DONE] One SD card is configured at GPIO14 for both daily and monthly storage.
 [DONE] RFID key returns are supported on Home Dashboard pages 2/3 only;
        taken-slot state is stored in ESP32 Preferences.
-[DONE] Borrow/return slot outputs use timed relocking. Admin-only pages and
-       controls require an authenticated admin session.
+[DONE] Borrow/return slot outputs remain open until the user confirms the
+       physical key action; a verified transaction is committed before the
+       output closes. Admin-only pages and controls require an authenticated
+       admin session.
 [DONE] Optional QR borrower lookup supports /students.csv on the SD root.
 [DONE] Current-log restoration is implemented from the RTC day's daily
        transaction archive at startup, and refreshes when the RTC date changes.
@@ -177,8 +194,9 @@ UPCOMING WORK - PRIORITY ORDER
    - Confirm GPIO14 SD initialization, writing, and card-removal behavior.
    - Test daily/monthly CSV creation, quoted CSV fields, reboot history reload,
      and legacy root-file migration on a backed-up test card.
-   - Borrow/return multiple slots and verify each output relocks independently.
-   - Verify RFID returns on Locked Screen and both Home Dashboard pages.
+   - Borrow/return multiple slots; verify outputs remain open until dashboard
+     OK confirms the action, then close, and verify cancel/safety behavior.
+   - Verify RFID returns on both Home Dashboard pages.
    - Power-cycle and verify today's current-log cards and occupied/available
      slot states persist as intended.
    - Verify current-log and Admin transaction displays show the newest
@@ -186,7 +204,8 @@ UPCOMING WORK - PRIORITY ORDER
    - Change or advance the RTC across midnight and verify the current-log view
      changes to the new day's archive without deleting prior-day files.
    - Exercise QR/manual borrower entry, optional roster lookup, admin access,
-     limit-switch safety, and display idle/wake behavior.
+   limit-switch safety, display idle/wake behavior, and the GPIO12
+   door-cover buzzer countdown/inhibit/pattern.
    - Specifically trigger the limit switch after selecting a dashboard slot,
      release it, re-enter the dashboard, and confirm a zero-valued slot VP
      touch selects the slot and the confirm button proceeds normally.

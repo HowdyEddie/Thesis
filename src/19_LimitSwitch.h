@@ -72,6 +72,7 @@ void handleLimitSwitchSafetyLock() {
     debugLog("handleLimitSwitchSafetyLock", "Limit switch HIGH. Locking all slots and returning to Locked Screen.");
 
     lockAllSlotSolenoids();
+    cancelPendingLockerAction(false);
 
     qrScanActive = false;
     qrBuffer = "";

@@ -42,6 +42,12 @@ void handleDWIN(uint16_t vp, uint16_t value) {
     Serial.println();
   }
 
+  if (pendingLockerAction.type != LOCKER_ACTION_NONE &&
+      vp != VP_SLOT_CONFIRM && vp != VP_SLOT_CANCEL) {
+    Serial.println("Input ignored while key confirmation is pending.");
+    return;
+  }
+
   if (handleDisplayWakeTouch(vp, value)) return;
   if (handleKeyboard(vp, value)) return;
   if (handleQRControls(vp, value)) return;

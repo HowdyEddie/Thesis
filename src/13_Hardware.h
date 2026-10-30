@@ -15,10 +15,31 @@ void initHardwarePins() {
   pinMode(RFID_CS, OUTPUT);
   pinMode(SD_STORAGE_CS, OUTPUT);
   pinMode(USB_CS, OUTPUT);
+  pinMode(COVER_LOCK_PIN, OUTPUT);
 
   digitalWrite(RFID_CS, HIGH);
   digitalWrite(SD_STORAGE_CS, HIGH);
   digitalWrite(USB_CS, HIGH);
+  digitalWrite(COVER_LOCK_PIN, COVER_LOCK_INACTIVE_LEVEL);
+  coverLockPulseActive = false;
+}
+
+void triggerCoverLockPulse() {
+  digitalWrite(COVER_LOCK_PIN, COVER_LOCK_ACTIVE_LEVEL);
+  coverLockPulseStartedAt = millis();
+  coverLockPulseActive = true;
+  debugLog("triggerCoverLockPulse", "Registered fingerprint validated; cover trigger activated.");
+}
+
+void updateCoverLockPulse() {
+  if (!coverLockPulseActive ||
+      millis() - coverLockPulseStartedAt < COVER_LOCK_PULSE_MS) {
+    return;
+  }
+
+  digitalWrite(COVER_LOCK_PIN, COVER_LOCK_INACTIVE_LEVEL);
+  coverLockPulseActive = false;
+  debugLog("updateCoverLockPulse", "Cover trigger pulse ended.");
 }
 
 /*

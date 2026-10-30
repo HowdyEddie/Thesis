@@ -106,6 +106,7 @@ bool handleDisplayWakeTouch(uint16_t vp, uint16_t value) {
 void handleDisplayIdleSleep() {
   if (dwinBacklightSleeping) return;
   if (currentPage == PAGE_LOADING) return;
+  if (pendingLockerAction.type != LOCKER_ACTION_NONE) return;
 
   if (millis() - lastUserActivityMillis < DISPLAY_IDLE_TIMEOUT_MS) return;
 

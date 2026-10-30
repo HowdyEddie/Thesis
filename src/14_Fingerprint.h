@@ -72,15 +72,19 @@ void checkLockedScreenFingerprint() {
 
   int id = getFingerprintID();
 
-  if (id > 0) {
-    if (isFingerprintIDRegistered(id)) {
-      debugLog("checkLockedScreenFingerprint", "Registered fingerprint matched.");
-      setCurrentHomeUserFromFingerprint(id);
-      goToHomeDashboard(PAGE_HOME_DASHBOARD_A);
-    } else {
-      debugLog("checkLockedScreenFingerprint", "Unlinked fingerprint template matched.");
-    }
+  if (id <= 0) return;
+
+  debugNumber("checkLockedScreenFingerprint", "Matched fingerprint template ID", id);
+  if (!isFingerprintIDRegistered(id)) {
+    debugFail("checkLockedScreenFingerprint", "Template matched, but its ID is not linked to a saved account; access denied.");
+    return;
   }
+
+  debugLog("checkLockedScreenFingerprint", "Registered fingerprint validated; opening Home Dashboard.");
+  setCurrentHomeUserFromFingerprint(id);
+  goToHomeDashboard(PAGE_HOME_DASHBOARD_A);
+  triggerCoverLockPulse();
+  debugNumber("checkLockedScreenFingerprint", "Dashboard page after login", currentPage);
 }
 
 /*
@@ -118,7 +122,7 @@ int getFingerprintID() {
   p = finger.fingerSearch(1);
 
   if (p == FINGERPRINT_OK) {
-    debugLog("getFingerprintID", "Fingerprint matched.");
+    debugNumber("getFingerprintID", "Sensor-matched template ID", finger.fingerID);
     return finger.fingerID;
   }
 

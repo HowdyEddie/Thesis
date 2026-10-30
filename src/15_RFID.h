@@ -97,15 +97,16 @@ String waitForRFIDTag(uint32_t timeoutMs) {
 /*
   Function: checkLockedScreenRFIDReturn()
   Description:
-    Automatically scans RFID on Home Dashboard Pages 2/3 only. If the UID
-    belongs to a registered key, the matching slot unlocks and the key is
-    marked as returned.
+    Automatically scans RFID on Home Dashboard Pages 2/3 only. A matching
+    borrowed key stages a return and opens its slot until dashboard OK confirms.
 
   How to use:
     Called in loop() while Home Dashboard Page 2 or 3 is active.
 */
 void checkLockedScreenRFIDReturn() {
   if (!rfidReady) return;
+  if (pendingLockerAction.type != LOCKER_ACTION_NONE) return;
+  if (digitalRead(LIMIT_SWITCH_PIN) == LIMIT_SWITCH_ACTIVE_LEVEL) return;
   if (millis() - lastRFIDReturnCheck < RFID_RETURN_SCAN_INTERVAL) return;
 
   lastRFIDReturnCheck = millis();
@@ -132,17 +133,46 @@ void checkLockedScreenRFIDReturn() {
     return;
   }
 
-  if (markRegisteredKeyReturned((uint8_t)keyIndex)) {
-    lastReturnedRFIDUID = uid;
-    lastRFIDReturnAction = millis();
+  beginRegisteredKeyReturn((uint8_t)keyIndex);
+}
+
+bool beginRegisteredKeyReturn(uint8_t keyIndex) {
+  if (pendingLockerAction.type != LOCKER_ACTION_NONE ||
+      keyIndex >= MAX_KEYS || !registeredKeys[keyIndex].used) {
+    return false;
   }
+
+  uint8_t slotNumber = registeredKeys[keyIndex].slotNumber;
+  if (slotNumber < 1 || slotNumber > SLOT_COUNT) return false;
+  uint8_t slotIndex = slotNumber - 1;
+  if (!slotTaken[slotIndex] ||
+      digitalRead(LIMIT_SWITCH_PIN) == LIMIT_SWITCH_ACTIVE_LEVEL) {
+    return false;
+  }
+
+  pendingLockerAction.type = LOCKER_ACTION_RETURN;
+  pendingLockerAction.slotIndex = slotIndex;
+  pendingLockerAction.keyIndex = keyIndex;
+  pendingLockerAction.keyNumber = registeredKeys[keyIndex].keyNumber;
+  pendingLockerAction.keyName = registeredKeys[keyIndex].keyName;
+  pendingLockerAction.borrowerName = "";
+  pendingLockerAction.studentCode = "";
+  pendingLockerAction.userName = "RFID Return";
+
+  clearSlotSelections();
+  selectedSlotIndex = -1;
+  slotUnlockActive[slotIndex] = false;
+  setSlotLockOutput(slotIndex, true);
+  showKeyConfirmationPopup();
+  debugNumber("beginRegisteredKeyReturn", "Waiting for return confirmation for slot", slotNumber);
+  return true;
 }
 
 /*
   Function: markRegisteredKeyReturned()
   Description:
-    Opens the registered slot, marks the key as returned, updates logs,
-    and starts an automatic relock timer.
+    Commits a confirmed RFID return, updates logs and saved slot state, then
+    closes the slot output.
 
   How to use:
     markRegisteredKeyReturned(keyIndex);
@@ -178,13 +208,12 @@ bool markRegisteredKeyReturned(uint8_t keyIndex) {
     LOG_STATUS_RETURNED
   );
 
-  setSlotLockOutput(slotIndex, true);
-  startTimedSlotUnlock(slotIndex);
-
   slotTaken[slotIndex] = false;
   saveSlotTakenState(slotIndex);
   slotDisplayState[slotIndex] = SLOT_AVAILABLE;
   slotSelected[slotIndex] = false;
+  slotUnlockActive[slotIndex] = false;
+  setSlotLockOutput(slotIndex, false);
   updateSlotDisplay(slotIndex);
 
   String line = today + "," + returnedTime + "," +
@@ -204,7 +233,8 @@ bool markRegisteredKeyReturned(uint8_t keyIndex) {
 /*
   Function: updateReturnUnlockRelock()
   Description:
-    Relocks any slot output after its timed borrow/return unlock interval.
+    Services any legacy timed slot unlocks. Confirmed borrow/return actions
+    now close their output directly after the transaction commits.
 
   How to use:
     Called continuously in loop().
