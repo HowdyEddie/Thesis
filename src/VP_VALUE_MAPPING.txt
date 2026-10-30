@@ -110,6 +110,10 @@ Transaction Log:
   browse toward newer or older records; selecting an export date is preserved
   while the transaction view order changes.
 
+Admin Dashboard Date Logs:
+- Date cards display in MM/DD/YY format (for example, 10/30/26).
+- Archive date values remain YYYY-MM-DD for selection and storage.
+
 Account Page:
 - Account card base = 0x3600
 - Step = 0x50
@@ -118,6 +122,8 @@ Account Page:
 - User Name offset = 0x08, 32 bytes / 16 words
 - Fingerprint ID offset = 0x18, 16 bytes / 8 words
 - Date Registered offset = 0x20, 16 bytes / 8 words
+- Date Registered display format = MM/DD/YY (for example, 10/30/26);
+  account dates remain stored as YYYY-MM-DD.
 
 Registration Page:
 - User name text = 0x3800, 32 bytes / 16 words

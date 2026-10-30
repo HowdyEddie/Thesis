@@ -250,11 +250,19 @@ void renderAccounts() {
     }
 
     uint16_t base = VP_ACCOUNT_CARD_BASE + (card * ACCOUNT_CARD_STEP);
+    String registeredDate = accounts[index].dateRegistered;
+    if (registeredDate.length() == 10 &&
+        registeredDate.charAt(4) == '-' &&
+        registeredDate.charAt(7) == '-') {
+      registeredDate = registeredDate.substring(5, 7) + "/" +
+                       registeredDate.substring(8, 10) + "/" +
+                       registeredDate.substring(2, 4);
+    }
 
     writeVPText(base + ACC_USERNO_OFFSET, accounts[index].userNumber.c_str(), ACC_USERNO_BYTES);
     writeVPText(base + ACC_USERNAME_OFFSET, accounts[index].userName.c_str(), ACC_USERNAME_BYTES);
     writeVPText(base + ACC_FINGERID_OFFSET, String(accounts[index].fingerprintID).c_str(), ACC_FINGERID_BYTES);
-    writeVPText(base + ACC_DATE_OFFSET, accounts[index].dateRegistered.c_str(), ACC_DATE_BYTES);
+    writeVPText(base + ACC_DATE_OFFSET, registeredDate.c_str(), ACC_DATE_BYTES);
   }
 }
 
