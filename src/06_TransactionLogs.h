@@ -55,8 +55,19 @@ void addDateLogIfMissing(String dateText) {
     if (dateLogs[i] == dateText) return;
   }
 
-  if (dateLogCount >= MAX_DATE_LOGS) return;
-
+  if (dateLogCount >= MAX_DATE_LOGS) {
+    // List full: the oldest date leaves the list (its SD files stay) so the new one is kept.
+    String removedDate = dateLogs[0];
+    for (uint8_t i = 1; i < MAX_DATE_LOGS; i++) {
+      dateLogs[i - 1] = dateLogs[i];
+    }
+    dateLogCount = MAX_DATE_LOGS - 1;
+    if (selectedDateText == removedDate) {
+      selectedDateText = dateText;
+      selectedDateVisibleIndex = 0;
+      dateCardOffset = 0;
+    }
+  }
   dateLogs[dateLogCount] = dateText;
   dateLogCount++;
 }
@@ -84,6 +95,19 @@ bool addTransactionLog(String keyNo, String borrowerName, String keyName,
     return false;
   }
 
+  addDateLogIfMissing(dateText);
+
+  if (selectedDateText.length() == 0) {
+    selectedDateText = dateText;
+    selectedDateVisibleIndex = 0;
+  }
+
+  // The view buffer holds only the selected date; other dates stay on the SD card.
+  if (dateText != selectedDateText) {
+    if (currentPage == PAGE_ADMIN_DASHBOARD) renderDateCards();
+    return true;
+  }
+
   if (transactionLogCount >= MAX_TRANSACTION_LOGS) {
     for (uint8_t i = 1; i < MAX_TRANSACTION_LOGS; i++) {
       transactionLogs[i - 1] = transactionLogs[i];
@@ -100,17 +124,8 @@ bool addTransactionLog(String keyNo, String borrowerName, String keyName,
   transactionLogs[transactionLogCount].dateText = dateText;
   transactionLogCount++;
 
-  addDateLogIfMissing(dateText);
-
   if (currentPage == PAGE_ADMIN_DASHBOARD) {
-    if (selectedDateText == dateText) {
-      transactionLogOffset = 0;
-    } else {
-      uint16_t maxOffset = transactionLogCount > TRANS_VISIBLE_ROWS
-          ? transactionLogCount - TRANS_VISIBLE_ROWS
-          : 0;
-      if (transactionLogOffset < maxOffset) transactionLogOffset++;
-    }
+    transactionLogOffset = 0;
     renderTransactionLogs();
     renderDateCards();
   }
@@ -127,6 +142,13 @@ bool addTransactionLog(String keyNo, String borrowerName, String keyName,
     Called when Admin Dashboard opens or when scrolling.
 */
 void renderTransactionLogs() {
+  String shownDate = selectedDateText;
+  if (shownDate.length() == 10 && shownDate.charAt(4) == '-' && shownDate.charAt(7) == '-') {
+    shownDate = shownDate.substring(5, 7) + "/" + shownDate.substring(8, 10) + "/" +
+                shownDate.substring(2, 4);
+  }
+  writeVPText(VP_SELECTED_DATE, shownDate.c_str(), DATE_CARD_BYTES);
+
   for (uint8_t row = 0; row < TRANS_VISIBLE_ROWS; row++) {
     uint16_t visibleIndex = transactionLogOffset + row;
     if (visibleIndex >= transactionLogCount) {
@@ -138,7 +160,12 @@ void renderTransactionLogs() {
     uint16_t base = VP_TRANS_BASE + (row * TRANS_ROW_STEP);
 
     writeVPText(base + TRANS_KEYNO_OFFSET, transactionLogs[logIndex].keyNo.c_str(), TRANS_KEYNO_BYTES);
-    writeVPText(base + TRANS_BORROWER_OFFSET, transactionLogs[logIndex].borrowerName.c_str(), TRANS_BORROWER_BYTES);
+    String firstName = transactionLogs[logIndex].borrowerName;
+    firstName.trim();
+    int spaceAt = firstName.indexOf(' ');
+    if (spaceAt > 0) firstName = firstName.substring(0, spaceAt);
+
+    writeVPText(base + TRANS_BORROWER_OFFSET, firstName.c_str(), TRANS_BORROWER_BYTES);
     writeVPText(base + TRANS_KEYNAME_OFFSET, transactionLogs[logIndex].keyName.c_str(), TRANS_KEYNAME_BYTES);
     writeVPText(base + TRANS_BORROWED_OFFSET, transactionLogs[logIndex].borrowedTime.c_str(), TRANS_BORROWED_BYTES);
     writeVPText(base + TRANS_RETURNED_OFFSET, transactionLogs[logIndex].returnedTime.c_str(), TRANS_RETURNED_BYTES);
@@ -232,11 +259,13 @@ void scrollTransactionLogsDown() {
 */
 void renderDateCards() {
   for (uint8_t card = 0; card < DATE_CARD_COUNT; card++) {
-    uint8_t index = dateCardOffset + card;
     uint16_t vp = VP_DATE_CARD_BASE + (card * DATE_CARD_STEP);
 
-    if (index < dateLogCount) {
-      String displayDate = dateLogs[index];
+    // Card 1 is the newest date; dateLogs is stored oldest-first.
+    uint8_t newestFirstIndex = dateCardOffset + card;
+
+    if (newestFirstIndex < dateLogCount) {
+      String displayDate = dateLogs[dateLogCount - 1 - newestFirstIndex];
       if (displayDate.length() == 10 &&
           displayDate.charAt(4) == '-' &&
           displayDate.charAt(7) == '-') {
@@ -280,12 +309,13 @@ bool handleDateCards(uint16_t vp, uint16_t value) {
 
   if (vp == VP_DATE_SELECT) {
     if (value >= 1 && value <= DATE_CARD_COUNT) {
-      uint8_t selectedIndex = dateCardOffset + (value - 1);
+      uint8_t newestFirstIndex = dateCardOffset + (value - 1);
 
-      if (selectedIndex < dateLogCount) {
+      if (newestFirstIndex < dateLogCount) {
         selectedDateVisibleIndex = value - 1;
-        selectedDateText = dateLogs[selectedIndex];
-
+        selectedDateText = dateLogs[dateLogCount - 1 - newestFirstIndex];
+        loadSelectedDateTransactionsFromSD();
+        renderTransactionLogs();
         Serial.print("Selected date: ");
         Serial.println(selectedDateText);
       }

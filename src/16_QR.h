@@ -13,7 +13,8 @@
 */
 bool initQRScanner() {
 #if HAS_QR_SOFTWARE_SERIAL
-  QRSerial.begin(QR_BAUD);
+  // Larger RX buffer so bytes survive while loop() is busy with SD/USB/display work.
+  QRSerial.begin(QR_BAUD, SWSERIAL_8N1, QR_RX, QR_TX, false, 256);
   qrReady = true;
   debugOK("initQRScanner");
 #else
@@ -34,9 +35,22 @@ bool initQRScanner() {
     Called automatically in loop() while Page 4 is open and QR sensing is active.
 */
 void handleQRScanner() {
-  if (!qrReady || !qrScanActive || currentPage != PAGE_QR_BORROWER) return;
+  if (!qrReady) return;
 
 #if HAS_QR_SOFTWARE_SERIAL
+  // Diagnostic: report scanner traffic that arrives while scanning is not active.
+  if (!qrScanActive || currentPage != PAGE_QR_BORROWER) {
+    int ignored = 0;
+    while (QRSerial.available()) {
+      QRSerial.read();
+      ignored++;
+    }
+    if (ignored > 0) {
+      debugNumber("handleQRScanner", "QR bytes ignored (Page 4 not scanning)", ignored);
+    }
+    return;
+  }
+
   while (qrScanActive && QRSerial.available()) {
     char c = QRSerial.read();
 

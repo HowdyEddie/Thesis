@@ -317,7 +317,7 @@
 
 // Admin date cards
 #define VP_DATE_CARD_BASE      0x3400
-#define DATE_CARD_STEP         0x20
+#define DATE_CARD_STEP         0x08
 #define DATE_CARD_COUNT        6
 #define MAX_DATE_LOGS          60
 
@@ -325,6 +325,7 @@
 #define VP_DATE_SCROLL_DOWN    0x34D1
 #define VP_DATE_SELECT         0x34D2
 #define VP_DOWNLOAD_ICON       0x34E0
+#define VP_SELECTED_DATE       0x3440
 
 #define DATE_CARD_BYTES        16
 #define MAX_PENDING_MONTHLY_MIRRORS 120
@@ -722,6 +723,7 @@ void clearCurrentLogCard(uint8_t cardIndex);
 void scrollCurrentLogsUp();
 void scrollCurrentLogsDown();
 bool loadCurrentLogsForDateFromSD(const String &dateText);
+bool loadSelectedDateTransactionsFromSD();
 void syncCurrentLogsWithRTCDate();
 bool handleCurrentLogControls(uint16_t vp, uint16_t value);
 void addCurrentLog(String keyName, String borrowerName, String keyNumber, String timeText, uint16_t statusIcon);

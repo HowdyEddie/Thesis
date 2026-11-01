@@ -157,7 +157,7 @@ bool beginRegisteredKeyReturn(uint8_t keyIndex) {
   pendingLockerAction.keyName = registeredKeys[keyIndex].keyName;
   pendingLockerAction.borrowerName = "";
   pendingLockerAction.studentCode = "";
-  pendingLockerAction.userName = "RFID Return";
+  pendingLockerAction.userName = "RFID";
 
   clearSlotSelections();
   selectedSlotIndex = -1;
@@ -194,7 +194,7 @@ bool markRegisteredKeyReturned(uint8_t keyIndex) {
           registeredKeys[keyIndex].keyName,
           "--:--",
           returnedTime,
-          "RFID Return",
+          "RFID",
           today)) {
     debugFail("markRegisteredKeyReturned", "Return cancelled because the daily transaction could not be committed.");
     return false;
