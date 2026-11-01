@@ -1,0 +1,172 @@
+SMARTLOCKERSTORAGE - PROJECT LIMITATIONS
+=========================================
+All values come from src/main.cpp unless noted. "Limit reached" means the
+count equals the maximum; "exceeded" means one more item is attempted.
+
+
+1. CAPACITY LIMITS
+------------------
+Item                              Limit   Macro
+Locker slots                      40      SLOT_COUNT
+Registered keys                   40      MAX_KEYS
+Registered accounts (users)       60      MAX_ACCOUNTS
+Date Logs kept in the date list   60      MAX_DATE_LOGS
+Transactions loaded per date      120     MAX_TRANSACTION_LOGS
+Current Logs (Locked Screen)      40      MAX_CURRENT_LOGS
+Current Log cards on screen       6       MAX_CURRENT_LOG_CARDS
+Transaction Log rows on screen    11      TRANS_VISIBLE_ROWS
+Date cards on screen              6       DATE_CARD_COUNT
+Pending monthly SD mirror retries 120     MAX_PENDING_MONTHLY_MIRRORS
+
+
+2. TEXT-LENGTH LIMITS (DWIN text fields)
+----------------------------------------
+Key No / User No / Finger ID / Date / RFID text   16 bytes
+Borrower / Key name / User name / Keyboard input  32 bytes
+Current Log key name                              16 bytes
+Current Log time                                  24 bytes
+Transaction Log times (Borrowed / Returned)       16 bytes
+Date card and Selected Date (0x3440)              16 bytes
+Admin PIN                                         4 digits
+
+
+3. TIMING LIMITS
+----------------
+Display sleep after idle           60 s    DISPLAY_IDLE_TIMEOUT_MS
+Buzzer starts after sleep          30 s    BUZZER_ALERT_DELAY_MS
+Buzzer pattern repeat              2 s     BUZZER_PATTERN_CYCLE_MS
+Cover trigger (GPIO15) pulse       1 s     COVER_LOCK_PULSE_MS
+Return unlock                      5 s     RETURN_UNLOCK_MS
+Same RFID tag re-read guard        5 s     RFID_RETURN_REPEAT_GUARD_MS
+RFID key registration wait         10 s    KEYREG_RFID_WAIT_MS
+Download status icon shown         5 s     DOWNLOAD_STATUS_DISPLAY_MS
+QR data timeout (no newline sent)  0.5 s   QR_INTERBYTE_TIMEOUT_MS
+
+
+4. WHAT HAPPENS WHEN A LIMIT IS REACHED OR EXCEEDED
+---------------------------------------------------
+
+4.1 Locker slots (40) / Key No range
+  - Key No must be digits only, from 1 to 40.
+  - Anything else (0, 41, letters, empty) is rejected: the key is not saved
+    and the previous values are kept.
+
+4.2 Registered keys (40)
+  - When all 40 key records are used and a NEW slot is registered, the
+    registration fails ("Key list is full") and nothing is saved.
+  - Re-registering an existing slot still works (it updates that record).
+  - One RFID tag cannot be assigned to two different slots; the second
+    attempt is rejected.
+  Fix: remove an unused key record first.
+
+4.3 Registered accounts (60)
+  - The 61st account is rejected ("Account list full"). Nothing is saved
+    and the fingerprint is not linked to a new account.
+  - A fingerprint ID that already belongs to an account is also rejected.
+  Fix: delete an unused account first.
+
+4.4 Date Logs list (60 dates)
+  - When 60 dates are already listed and a NEW date arrives, the OLDEST date
+    is removed from the Date Log list and the new date is kept (newest 60
+    dates are always shown). The same applies at startup.
+  - Removed dates are only dropped from the dashboard list. Their files stay
+    on the SD card (/daily/<date>/ and /monthly/<month>/), so no data is lost.
+  - If the removed date was the one being viewed, the view jumps to the newest
+    date.
+  Tip: to free SD space, delete old /daily/YYYY-MM-DD folders manually.
+
+4.5 Transactions per date (120 rows in the view)
+  - When a date has more than 120 transactions, only the NEWEST 120 are shown
+    in the Admin Transaction Log. The oldest rows of that day are dropped
+    from the on-screen view only.
+  - The SD card file and the USB download still contain EVERY row.
+
+4.6 Current Logs (40 entries)
+  - When 40 entries exist, the oldest entry is removed so the newest can be
+    added. Only the 6 newest cards are shown on the Locked Screen anyway.
+  - The SD card records are not affected.
+
+4.7 Pending monthly mirror retries (120)
+  - If the queue is full, new monthly-copy retries are skipped. The daily
+    archive stays correct, and missing monthly copies are rebuilt on the next
+    startup.
+
+4.8 Text length
+  - Text longer than the field size is cut off on the DWIN display.
+  - Borrower names in the Transaction Log show only the first name; the
+    saved record and the USB file keep the full name.
+
+4.9 SD card
+  - If the SD card on GPIO14 is missing or fails, a borrow/return is NOT
+    completed: the transaction must be written to the daily archive first, so
+    the slot stays open/pending and the action is refused.
+  - Selecting a date while the SD card is missing cannot load its
+    transactions.
+
+4.10 USB download
+  - Only one file is exported per date: YYMMDDT.CSV (transactions), using the
+    FAT 8.3 filename format.
+  - If the selected date has no transactions, or the drive is missing, not
+    FAT formatted, or not ready, the download icon shows Failed or USB Not
+    Found.
+  - An existing file with the same name on the USB drive is replaced.
+
+4.11 Display idle timeout (60 s)
+  - After 60 s of inactivity the temporary session (selected slot, QR data,
+    keyboard text) is cleared, the display returns to the Locked Screen, and
+    the backlight turns off.
+  - Sleep is postponed while a borrow/return confirmation is pending.
+
+4.12 Buzzer / cover
+  - The buzzer starts 30 s after the display sleeps and repeats a three-beep
+    pattern every 2 s. It is silenced while the limit switch (GPIO34,
+    active HIGH) is active.
+  - When the limit switch is active, all slots are locked, pending actions
+    are cancelled, and the Locked Screen is shown.
+
+
+5. SD CARD STORAGE ESTIMATE (16 GB card)
+-----------------------------------------
+Estimates from the CSV format; not measured on the actual card.
+
+Row size: a transaction row is about 90-120 bytes (about 110 B used).
+
+One busy day (worst case: 40 keys, each borrowed and returned once = 80 events):
+  /daily/<date>/transactions.csv   80 rows x 110 B     about 9 KB
+  /daily/<date>/returns.csv        40 rows x 110 B     about 4 KB
+  accounts.csv / keys.csv          only when registering  under 1 KB
+  Daily folder total                                   about 14 KB
+  Same rows copied to /monthly/                        about 14 KB
+  Total per day                                        about 28 KB
+
+Disk overhead: FAT32 stores each file in whole clusters (usually 8-16 KB on
+a 16 GB card), so four small files per day can occupy about 64 KB.
+Realistic upper bound: about 100 KB per day including the monthly copy.
+
+How long 16 GB lasts:
+  Usable space about 14.5 GB = 14,500,000 KB
+  14,500,000 KB / 100 KB per day = about 145,000 days = about 400 years
+  Even at 10x the estimate (1 MB per day): about 40 years.
+Conclusion: storage space is not a limit for this project.
+
+Things that matter more than space:
+  1. The 60-date list: only the newest 60 dates show on the dashboard, but
+     all folders stay on the card.
+  2. Startup time: at boot the device scans every /daily folder and checks
+     each date's monthly copies. After thousands of folders, startup gets
+     slower. Deleting old /daily folders once a year or each semester avoids
+     this.
+  3. SD card wear: writes are small and infrequent, so a good-quality card
+     lasts for years.
+  4. Backups: the SD card is the only copy of the data. Copy it to a PC or
+     USB periodically.
+
+
+6. HARDWARE NOTES
+-----------------
+  - One SD card only (GPIO14) holds both daily and monthly archives.
+  - GPIO12 (buzzer) and GPIO15 (cover trigger) are boot-strapping pins; do not
+    pull them to the wrong level during reset.
+  - The CH376S USB host reads FAT-formatted drives only.
+  - Physical behavior (buzzer, confirmation, GPIO15, date cards, USB) should
+    still be verified on the actual hardware.

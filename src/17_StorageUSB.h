@@ -109,14 +109,21 @@ bool insertArchiveDate(String *dates, uint8_t &count, const String &dateText) {
   uint8_t position = 0;
   while (position < count && dates[position] < dateText) position++;
   if (position < count && dates[position] == dateText) return false;
-  if (count == MAX_DATE_LOGS && position == count) return false;
+  if (count == MAX_DATE_LOGS) {
+    // List full: drop the oldest date and keep the newest MAX_DATE_LOGS.
+    if (position == 0) return false;
+    for (uint8_t i = 1; i < position; i++) {
+      dates[i - 1] = dates[i];
+    }
+    dates[position - 1] = dateText;
+    return true;
+  }
 
-  uint8_t newCount = count < MAX_DATE_LOGS ? count + 1 : count;
-  for (int i = newCount - 1; i > position; i--) {
+  for (int i = count; i > position; i--) {
     dates[i] = dates[i - 1];
   }
   dates[position] = dateText;
-  count = newCount;
+  count++;
   return true;
 }
 
@@ -323,6 +330,44 @@ bool migrateLegacyRootLogs() {
   return migrationSucceeded;
 }
 
+/*
+  Loads the selected date's transactions from /daily/<date>/transactions.csv
+  into transactionLogs[] (the Admin Dashboard view buffer, newest 120 rows).
+*/
+bool loadSelectedDateTransactionsFromSD() {
+  transactionLogCount = 0;
+  transactionLogOffset = 0;
+  if (selectedDateText.length() == 0) return true;
+
+  if (!SD.begin(SD_STORAGE_CS, SPI)) {
+    storageSDReady = false;
+    debugFail("loadSelectedDateTransactionsFromSD", "SD card not available at CS GPIO14.");
+    return false;
+  }
+
+  String transactionPath = "/daily/" + selectedDateText + "/transactions.csv";
+  File transactionFile = SD.open(transactionPath.c_str(), FILE_READ);
+  if (transactionFile) {
+    while (transactionFile.available()) {
+      String line = readCSVRecord(transactionFile);
+      if (line.length() == 0) continue;
+
+      String fields[8];
+      if (parseTransactionCSVFields(line, fields) && fields[0] == selectedDateText) {
+        addLoadedTransaction(fields);
+      } else {
+        debugFail("loadSelectedDateTransactionsFromSD", "Skipped malformed transaction row.");
+      }
+    }
+    transactionFile.close();
+  }
+
+  SD.end();
+  digitalWrite(SD_STORAGE_CS, HIGH);
+  debugNumber("loadSelectedDateTransactionsFromSD", "Rows loaded", transactionLogCount);
+  return true;
+}
+
 bool loadLogsFromSD() {
   if (!SD.begin(SD_STORAGE_CS, SPI)) {
     storageSDReady = false;
@@ -365,22 +410,6 @@ bool loadLogsFromSD() {
   for (uint8_t i = 0; i < loadedDateCount; i++) {
     addDateLogIfMissing(dates[i]);
     queueMissingMonthlyMirrorsForDate(dates[i]);
-    String transactionPath = "/daily/" + dates[i] + "/transactions.csv";
-    File transactionFile = SD.open(transactionPath.c_str(), FILE_READ);
-    if (!transactionFile) continue;
-
-    while (transactionFile.available()) {
-      String line = readCSVRecord(transactionFile);
-      if (line.length() == 0) continue;
-
-      String fields[8];
-      if (parseTransactionCSVFields(line, fields) && fields[0] == dates[i]) {
-        addLoadedTransaction(fields);
-      } else {
-        debugFail("loadLogsFromSD", "Skipped malformed transaction row.");
-      }
-    }
-    transactionFile.close();
   }
 
   SD.end();
@@ -389,8 +418,9 @@ bool loadLogsFromSD() {
 
   if (dateLogCount > 0) {
     selectedDateText = dateLogs[dateLogCount - 1];
-    dateCardOffset = dateLogCount > DATE_CARD_COUNT ? dateLogCount - DATE_CARD_COUNT : 0;
-    selectedDateVisibleIndex = dateLogCount - 1 - dateCardOffset;
+    dateCardOffset = 0;
+    selectedDateVisibleIndex = 0;
+    loadSelectedDateTransactionsFromSD();
   }
   transactionLogOffset = 0;
 
@@ -723,24 +753,13 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
            shortDate.c_str(), categoryCode);
 
   flashDrive.setFileName(destinationName);
+  flashDrive.setFileName(destinationName);
   uint8_t existingStatus = flashDrive.openFile();
   if (existingStatus == ANSW_USB_INT_SUCCESS) {
-    uint8_t existingCloseStatus = flashDrive.closeFile();
-    if (existingCloseStatus != ANSW_USB_INT_SUCCESS) {
-      source.close();
-      debugValue("copyDailyArchiveFileToUSB", "Could not close existing USB file", destinationName);
-      debugHex16("copyDailyArchiveFileToUSB", "Existing file close status", existingCloseStatus);
-      return false;
-    }
-
+    flashDrive.closeFile();
     flashDrive.setFileName(destinationName);
     uint8_t deleteStatus = flashDrive.deleteFile();
-    if (deleteStatus != ANSW_USB_INT_SUCCESS) {
-      source.close();
-      debugValue("copyDailyArchiveFileToUSB", "Could not replace USB file", destinationName);
-      debugHex16("copyDailyArchiveFileToUSB", "USB delete status", deleteStatus);
-      return false;
-    }
+    debugHex16("copyDailyArchiveFileToUSB", "USB delete status", deleteStatus);
   } else if (existingStatus != ANSW_ERR_MISS_FILE) {
     source.close();
     debugValue("copyDailyArchiveFileToUSB", "Could not inspect USB destination", destinationName);
@@ -748,11 +767,13 @@ bool copyDailyArchiveFileToUSB(const String &dateText,
     return false;
   }
 
+  // Whether or not the delete reported success, the name must now be free.
   flashDrive.setFileName(destinationName);
   uint8_t openStatus = flashDrive.openFile();
   if (openStatus != ANSW_ERR_MISS_FILE) {
     source.close();
-    debugNumber("copyDailyArchiveFileToUSB", "USB file was not ready for creation; status", openStatus);
+    debugValue("copyDailyArchiveFileToUSB", "USB file was not ready for creation", destinationName);
+    debugHex16("copyDailyArchiveFileToUSB", "USB open status", openStatus);
     return false;
   }
 
@@ -990,15 +1011,13 @@ void downloadSelectedDateLogToUSB() {
     return;
   }
 
-  const char *archiveNames[] = {
-    "accounts.csv", "keys.csv", "transactions.csv", "returns.csv"
-  };
-  const char categoryCodes[] = { 'A', 'K', 'T', 'R' };
+  const char *archiveNames[] = { "transactions.csv" };
+  const char categoryCodes[] = { 'T' };
   uint8_t exportedCount = 0;
   bool exportSucceeded = true;
   bool anySourceExists = false;
 
-  for (uint8_t i = 0; i < 4 && exportSucceeded; i++) {
+  for (uint8_t i = 0; i < 1 && exportSucceeded; i++) {
     bool sourceExists = false;
     bool sourceHasData = false;
     exportSucceeded = copyDailyArchiveFileToUSB(

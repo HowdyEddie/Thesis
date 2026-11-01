@@ -112,6 +112,9 @@ Transaction Log:
 
 Admin Dashboard Date Logs:
 - Date cards display in MM/DD/YY format (for example, 10/30/26).
+- Date card VPs: 0x3400, 0x3408, 0x3410, 0x3418, 0x3420, 0x3428
+  (step 0x08, 16 bytes each). Card 1 (0x3400) is the newest date; scrolling
+  down moves to older dates.
 - Archive date values remain YYYY-MM-DD for selection and storage.
 
 Account Page:
@@ -150,6 +153,9 @@ QR Page:
 - Status text = 0x1600, 32 bytes / 16 words
 - Selected slot text = 0x1620, 16 bytes / 8 words
 - Borrower code text = 0x1630, 24 bytes / 12 words
+
+Selected date (Admin Dashboard):
+- Text VP = 0x3440, 16 bytes / 8 words, shows MM/DD/YY of the date used by the Transaction Log and Download. Selecting a date card loads that date's transactions from SD.
 
 Download icon:
 - VP = 0x34E0
