@@ -154,6 +154,10 @@ QR Page:
 - Selected slot text = 0x1620, 16 bytes / 8 words
 - Borrower code text = 0x1630, 24 bytes / 12 words
 
+Fingerprint denied indicator (Locked Screen, Page 1):
+- Icon VP = 0x1680 (shared with the Admin login status icon)
+- 0x0003 = Denied, written for 2 s after a rejected fingerprint, then 0x0000
+
 Selected date (Admin Dashboard):
 - Text VP = 0x3440, 16 bytes / 8 words, shows MM/DD/YY of the date used by the Transaction Log and Download. Selecting a date card loads that date's transactions from SD.
 

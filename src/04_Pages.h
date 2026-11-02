@@ -101,6 +101,9 @@ void goToLockedScreen() {
   currentPage = PAGE_LOCKED_SCREEN;
   activeCurrentLogCards = CURRENT_LOG_CARDS_6;
 
+  // VP 0x1680 is shared with the Admin login icon; clear any stale granted/denied value.
+  writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_IDLE);
+
   changePage(PAGE_LOCKED_SCREEN);
   delay(120);
 

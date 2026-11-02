@@ -100,7 +100,7 @@ bool loadCurrentLogsForDateFromSD(const String &dateText) {
 
     CurrentLogEntry &entry = currentLogs[currentLogCount++];
     entry.keyName = fields[3];
-    entry.borrowerName = getCurrentLogFirstName(isReturn ? "Returned" : fields[2]);
+    entry.borrowerName = getCurrentLogFirstName(isReturn ? "RETURNED" : fields[2]);
     entry.keyNumber = fields[1];
     entry.timeText = timeText;
     entry.statusIcon = statusIcon;

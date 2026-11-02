@@ -55,7 +55,31 @@ bool initFingerprintModule() {
   How to use:
     Called automatically in loop() when currentPage == PAGE_LOCKED_SCREEN.
 */
+// Locked Screen "denied" indicator (VP 0x1680 value 0x0003), auto-cleared.
+#define FINGERPRINT_DENIED_SHOW_MS 2000UL
+static bool fingerprintRejectedFlag = false;
+static bool fingerprintDeniedShown = false;
+static unsigned long fingerprintDeniedShownAt = 0;
+
+void showFingerprintDenied() {
+  if (currentPage != PAGE_LOCKED_SCREEN) return;
+  writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_DENIED);
+  fingerprintDeniedShown = true;
+  fingerprintDeniedShownAt = millis();
+}
+
+void clearFingerprintDenied() {
+  if (!fingerprintDeniedShown) return;
+  writeVPWord(VP_ADMIN_LOGIN_STATUS_ICON, ADMIN_LOGIN_ICON_IDLE);
+  fingerprintDeniedShown = false;
+}
+
 void checkLockedScreenFingerprint() {
+  if (fingerprintDeniedShown &&
+      millis() - fingerprintDeniedShownAt >= FINGERPRINT_DENIED_SHOW_MS) {
+    clearFingerprintDenied();
+  }
+
   if (millis() - lastFingerprintCheck < 500) return;
 
   lastFingerprintCheck = millis();
@@ -70,16 +94,22 @@ void checkLockedScreenFingerprint() {
     return;
   }
 
+  fingerprintRejectedFlag = false;
   int id = getFingerprintID();
 
-  if (id <= 0) return;
+  if (id <= 0) {
+    if (fingerprintRejectedFlag) showFingerprintDenied();
+    return;
+  }
 
   debugNumber("checkLockedScreenFingerprint", "Matched fingerprint template ID", id);
   if (!isFingerprintIDRegistered(id)) {
     debugFail("checkLockedScreenFingerprint", "Template matched, but its ID is not linked to a saved account; access denied.");
+    showFingerprintDenied();
     return;
   }
 
+  clearFingerprintDenied();
   debugLog("checkLockedScreenFingerprint", "Registered fingerprint validated; opening Home Dashboard.");
   setCurrentHomeUserFromFingerprint(id);
   goToHomeDashboard(PAGE_HOME_DASHBOARD_A);
@@ -114,6 +144,7 @@ int getFingerprintID() {
 
   if (p != FINGERPRINT_OK) {
     debugNumber("getFingerprintID", "image2Tz failed. Error", p);
+    fingerprintRejectedFlag = true;
     return -1;
   }
 
@@ -125,6 +156,8 @@ int getFingerprintID() {
     debugNumber("getFingerprintID", "Sensor-matched template ID", finger.fingerID);
     return finger.fingerID;
   }
+
+  fingerprintRejectedFlag = true;
 
   if (p == FINGERPRINT_NOTFOUND) {
     debugFail("getFingerprintID", "No matching fingerprint found.");

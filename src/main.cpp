@@ -148,10 +148,10 @@
 //   Year, Month, Day, Hour, Minute, Second
 #define SET_RTC_FIXED_ONCE       0
 #define RTC_FIXED_YEAR           2026
-#define RTC_FIXED_MONTH          10
-#define RTC_FIXED_DAY            27
+#define RTC_FIXED_MONTH          11
+#define RTC_FIXED_DAY            2
 #define RTC_FIXED_HOUR           14
-#define RTC_FIXED_MINUTE         30
+#define RTC_FIXED_MINUTE         7
 #define RTC_FIXED_SECOND         0
 
 // =======================================================
